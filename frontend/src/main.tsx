@@ -68,6 +68,9 @@ type AnalysisResponse = {
 type ChatMessage = {
   role: "user" | "assistant";
   content: string;
+  evidence?: string[];
+  confidence?: string;
+  suggestedActions?: string[];
 };
 
 const defaultCashflows: CashflowDraft[] = [
@@ -88,7 +91,8 @@ function App() {
   ]);
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
   const [history, setHistory] = useState<AnalysisResponse[]>([]);
-  const [activeTab, setActiveTab] = useState<"analysis" | "history" | "chat">("analysis");
+  const [activeTab, setActiveTab] = useState<"analysis" | "history">("analysis");
+  const [chatOpen, setChatOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [question, setQuestion] = useState("");
@@ -168,7 +172,16 @@ function App() {
         body: JSON.stringify({ question: nextQuestion, analysis_id: analysis?.id ?? null }),
       });
       const data = await response.json();
-      setChatMessages((messages) => [...messages, { role: "assistant", content: data.answer }]);
+      setChatMessages((messages) => [
+        ...messages,
+        {
+          role: "assistant",
+          content: data.answer,
+          evidence: data.evidence ?? [],
+          confidence: data.confidence,
+          suggestedActions: data.suggested_actions ?? [],
+        },
+      ]);
     } finally {
       setChatLoading(false);
     }
@@ -294,56 +307,120 @@ function App() {
             <button className={activeTab === "history" ? "active" : ""} onClick={() => setActiveTab("history")}>
               <History size={17} /> 히스토리
             </button>
-            <button className={activeTab === "chat" ? "active" : ""} onClick={() => setActiveTab("chat")}>
-              <Bot size={17} /> 채팅
-            </button>
           </nav>
 
           {activeTab === "analysis" && (
-            <section className="content-area">
+            <section className={`content-area analysis-workspace ${chatOpen ? "chat-visible" : ""}`}>
               {analysis ? (
                 <>
-                  <div className="summary-grid">
-                    <Metric label="예상 누적 현금흐름" value={formatCurrency(totalNet)} />
-                    <Metric label="예측 순자산" value={formatCurrency(latest?.net_worth ?? 0)} />
-                    <Metric label="예측 개월" value={`${analysis.result.data_quality.forecast_months}개월`} />
-                  </div>
+                  <div className="dashboard-column">
+                    <div className="summary-grid">
+                      <Metric label="예상 누적 현금흐름" value={formatCurrency(totalNet)} />
+                      <Metric label="예측 순자산" value={formatCurrency(latest?.net_worth ?? 0)} />
+                      <Metric label="예측 개월" value={`${analysis.result.data_quality.forecast_months}개월`} />
+                    </div>
 
-                  <div className="summary-band">
-                    <p>{analysis.result.summary}</p>
-                    {analysis.id && (
-                      <a className="download-link" href={`${API_BASE_URL}/reports/analyses/${analysis.id}.pdf`}>
-                        <Download size={16} /> PDF
-                      </a>
-                    )}
-                  </div>
+                    <div className="summary-band">
+                      <p>{analysis.result.summary}</p>
+                      <div className="summary-actions">
+                        <button
+                          type="button"
+                          className={`toggle-chat-button ${chatOpen ? "active" : ""}`}
+                          onClick={() => setChatOpen((isOpen) => !isOpen)}
+                        >
+                          <Bot size={16} /> 채팅
+                        </button>
+                        {analysis.id && (
+                          <a className="download-link" href={`${API_BASE_URL}/reports/analyses/${analysis.id}.pdf`}>
+                            <Download size={16} /> PDF
+                          </a>
+                        )}
+                      </div>
+                    </div>
 
-                  <div className="chart-block">
-                    <h2>월별 수입/지출</h2>
-                    <ResponsiveContainer width="100%" height={280}>
-                      <AreaChart data={chartData}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="month" />
-                        <YAxis tickFormatter={(value) => `${Number(value) / 10000}만`} />
-                        <Tooltip formatter={(value) => formatCurrency(Number(value))} />
-                        <Legend />
-                        <Area type="monotone" dataKey="income" name="수입" stroke="#2563eb" fill="#bfdbfe" />
-                        <Area type="monotone" dataKey="expense" name="지출" stroke="#dc2626" fill="#fecaca" />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
+                    <div className={`dashboard-main ${chatOpen ? "chat-visible" : ""}`}>
+                      <div className="charts-column">
+                        <div className="chart-block">
+                          <h2>월별 수입/지출</h2>
+                          <ResponsiveContainer width="100%" height={280}>
+                            <AreaChart data={chartData}>
+                              <CartesianGrid strokeDasharray="3 3" />
+                              <XAxis dataKey="month" />
+                              <YAxis tickFormatter={(value) => `${Number(value) / 10000}만`} />
+                              <Tooltip formatter={(value) => formatCurrency(Number(value))} />
+                              <Legend />
+                              <Area type="monotone" dataKey="income" name="수입" stroke="#2563eb" fill="#bfdbfe" />
+                              <Area type="monotone" dataKey="expense" name="지출" stroke="#dc2626" fill="#fecaca" />
+                            </AreaChart>
+                          </ResponsiveContainer>
+                        </div>
 
-                  <div className="chart-block">
-                    <h2>순자산 추이</h2>
-                    <ResponsiveContainer width="100%" height={260}>
-                      <LineChart data={chartData}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="month" />
-                        <YAxis tickFormatter={(value) => `${Number(value) / 10000}만`} />
-                        <Tooltip formatter={(value) => formatCurrency(Number(value))} />
-                        <Line type="monotone" dataKey="net_worth" name="순자산" stroke="#0f766e" strokeWidth={3} dot={false} />
-                      </LineChart>
-                    </ResponsiveContainer>
+                        <div className="chart-block">
+                          <h2>순자산 추이</h2>
+                          <ResponsiveContainer width="100%" height={260}>
+                            <LineChart data={chartData}>
+                              <CartesianGrid strokeDasharray="3 3" />
+                              <XAxis dataKey="month" />
+                              <YAxis tickFormatter={(value) => `${Number(value) / 10000}만`} />
+                              <Tooltip formatter={(value) => formatCurrency(Number(value))} />
+                              <Line type="monotone" dataKey="net_worth" name="순자산" stroke="#0f766e" strokeWidth={3} dot={false} />
+                            </LineChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+
+                      {chatOpen && (
+                        <aside className="side-chat">
+                          <div className="inline-chat-header">
+                            <div>
+                              <h2>분석 질문</h2>
+                              <p>현재 분석 결과를 기준으로 답변합니다.</p>
+                            </div>
+                            <button type="button" className="ghost-button" onClick={() => setChatOpen(false)}>
+                              닫기
+                            </button>
+                          </div>
+                          <div className="messages inline">
+                            {chatMessages.length === 0 && (
+                              <EmptyState title="질문 없음" description="예: 6개월 뒤 순자산은 어떻게 돼?" />
+                            )}
+                            {chatMessages.map((message, index) => (
+                              <div className={`message ${message.role}`} key={`${message.role}-${index}`}>
+                                <p>{message.content}</p>
+                                {message.confidence && (
+                                  <span className={`confidence ${message.confidence}`}>신뢰도 {message.confidence}</span>
+                                )}
+                                {message.evidence && message.evidence.length > 0 && (
+                                  <ul className="message-list">
+                                    {message.evidence.slice(0, 4).map((item) => (
+                                      <li key={item}>{item}</li>
+                                    ))}
+                                  </ul>
+                                )}
+                                {message.suggestedActions && message.suggestedActions.length > 0 && (
+                                  <div className="suggested-actions">
+                                    {message.suggestedActions.slice(0, 2).map((item) => (
+                                      <span key={item}>{item}</span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                            {chatLoading && <div className="message assistant">답변 생성 중...</div>}
+                          </div>
+                          <form className="chat-form inline" onSubmit={sendQuestion}>
+                            <input
+                              value={question}
+                              onChange={(event) => setQuestion(event.target.value)}
+                              placeholder="예: 내 순현금흐름은 안정적인가?"
+                            />
+                            <button className="icon-button solid" title="전송">
+                              <Send size={18} />
+                            </button>
+                          </form>
+                        </aside>
+                      )}
+                    </div>
                   </div>
                 </>
               ) : (
@@ -371,26 +448,6 @@ function App() {
                 ))}
                 {history.length === 0 && <EmptyState title="저장된 분석 없음" description="분석을 저장하면 여기에 표시됩니다." />}
               </div>
-            </section>
-          )}
-
-          {activeTab === "chat" && (
-            <section className="chat-area">
-              <div className="messages">
-                {chatMessages.length === 0 && <EmptyState title="질문 없음" description="현재 분석 결과를 기준으로 질문할 수 있습니다." />}
-                {chatMessages.map((message, index) => (
-                  <div className={`message ${message.role}`} key={`${message.role}-${index}`}>
-                    {message.content}
-                  </div>
-                ))}
-                {chatLoading && <div className="message assistant">답변 생성 중...</div>}
-              </div>
-              <form className="chat-form" onSubmit={sendQuestion}>
-                <input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="예: 6개월 뒤 순자산은 어떻게 돼?" />
-                <button className="icon-button solid" title="전송">
-                  <Send size={18} />
-                </button>
-              </form>
             </section>
           )}
         </section>

@@ -9,4 +9,9 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     sources: list[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
+    confidence: str = "low"
+    intent: str = "general"
     needs_more_data: bool = False
+    missing_data: list[str] = Field(default_factory=list)
+    suggested_actions: list[str] = Field(default_factory=list)
