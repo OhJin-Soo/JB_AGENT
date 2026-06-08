@@ -56,3 +56,14 @@ def test_create_get_history_and_chat() -> None:
     assert any("2026-05" in item for item in monthly_chat.json()["evidence"])
     assert monthly_chat.json()["suggested_questions"]
     assert monthly_chat.json()["suggestion_reason"]
+
+    weather_chat = client.post(
+        "/chat",
+        json={"question": "전기요금 예측을 위해 기상청 API를 호출해줘", "analysis_id": analysis_id},
+    )
+    assert weather_chat.status_code == 200
+    weather_data = weather_chat.json()
+    assert weather_data["intent"] == "external_weather"
+    assert any("kma_sfcdd3.php" in item for item in weather_data["evidence"])
+    assert any("tm1, tm2, stn, help, authKey" in item for item in weather_data["evidence"])
+    assert not any("nx" in item or "base_date" in item for item in weather_data["evidence"])

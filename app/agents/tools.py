@@ -160,18 +160,34 @@ async def search_web_context(question: str) -> ToolResult:
 async def fetch_weather_context() -> ToolResult:
     today = date.today()
     start_date = date(today.year - 5, today.month, today.day)
+    api_spec = (
+        "기능 명세서의 기상청 API는 apihub.kma.go.kr/api/typ01/url/kma_sfcdd3.php를 사용합니다. "
+        "필수 인증키 환경변수는 WEATHER_API_KEY이며, 요청 파라미터는 tm1, tm2, stn, help, authKey입니다. "
+        "기본 지점번호는 stn=108이고, tm1/tm2는 최근 5년 기간을 YYYYMMDD 형식으로 전달합니다. "
+        "이 명세에는 nx, ny, base_date, base_time 좌표 기반 단기예보 API를 사용하지 않습니다."
+    )
     try:
         raw = await WeatherClient().fetch_daily_weather(start_date=start_date, end_date=today)
     except Exception as exc:
         return ToolResult(
             name="fetch_weather_context",
-            missing_data=["기상 API 조회 결과"],
-            content=f"기상 데이터를 조회하지 못했습니다: {exc}",
+            missing_data=["WEATHER_API_KEY 또는 기상 API 조회 결과"],
+            content=f"{api_spec} 기상 데이터를 조회하지 못했습니다: {exc}",
+            evidence=[
+                "기상청 API 명세: kma_sfcdd3.php",
+                "요청 파라미터: tm1, tm2, stn, help, authKey",
+                f"조회 예정 기간: {start_date:%Y%m%d}~{today:%Y%m%d}, stn=108",
+            ],
         )
     return ToolResult(
         name="fetch_weather_context",
-        content=raw[:2000],
-        evidence=["기상청 최근 5년 일별 관측 데이터 조회를 수행했습니다."],
+        content=f"{api_spec}\n조회 결과 일부:\n{raw[:2000]}",
+        evidence=[
+            "기상청 최근 5년 일별 관측 데이터 조회를 수행했습니다.",
+            "기상청 API 명세: kma_sfcdd3.php",
+            "요청 파라미터: tm1, tm2, stn, help, authKey",
+            f"조회 기간: {start_date:%Y%m%d}~{today:%Y%m%d}, stn=108",
+        ],
     )
 
 

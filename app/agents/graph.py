@@ -182,7 +182,10 @@ async def _generate_llm_answer(state: AgentState) -> str:
     system_prompt = (
         "You are a Korean financial analysis assistant. Answer concisely using only the "
         "provided tool results. Include uncertainty when missing_data is present. Do not "
-        "invent calculations or sources."
+        "invent calculations, sources, API parameters, or API formats. For weather API "
+        "questions, use only the documented kma_sfcdd3.php parameters tm1, tm2, stn, help, "
+        "and authKey. Do not mention nx, ny, base_date, or base_time unless they appear in "
+        "the tool results."
     )
     user_prompt = (
         f"Intent: {state['intent']}\n"
