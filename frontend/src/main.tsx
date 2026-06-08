@@ -82,20 +82,36 @@ const testQuestions = [
 ];
 
 const defaultCashflows: CashflowDraft[] = [
-  { date: "2026-01-01", amount: "3000000", type: "income", category: "월급", description: "" },
-  { date: "2026-02-01", amount: "3000000", type: "income", category: "월급", description: "" },
-  { date: "2026-03-01", amount: "3000000", type: "income", category: "월급", description: "" },
-  { date: "2026-01-05", amount: "1000000", type: "expense", category: "생활비", description: "" },
-  { date: "2026-02-05", amount: "1050000", type: "expense", category: "생활비", description: "" },
-  { date: "2026-03-05", amount: "1100000", type: "expense", category: "생활비", description: "" },
+  ...Array.from({ length: 12 }, (_, index) => {
+    const month = `${index + 1}`.padStart(2, "0");
+    return [
+      { date: `2025-${month}-01`, amount: "3000000", type: "income" as const, category: "월급", description: "" },
+      { date: `2025-${month}-10`, amount: "650000", type: "income" as const, category: "연금", description: "" },
+      {
+        date: `2025-${month}-05`,
+        amount: `${950000 + index * 15000}`,
+        type: "expense" as const,
+        category: "생활비",
+        description: "",
+      },
+      {
+        date: `2025-${month}-18`,
+        amount: `${130000 + (index % 4) * 25000}`,
+        type: "expense" as const,
+        category: "전기요금",
+        description: "계절성 공과금",
+      },
+    ];
+  }).flat(),
 ];
 
 function App() {
-  const [title, setTitle] = useState("6개월 현금흐름 분석");
+  const [title, setTitle] = useState("12개월 현금흐름 분석");
   const [forecastMonths, setForecastMonths] = useState(6);
   const [cashflows, setCashflows] = useState<CashflowDraft[]>(defaultCashflows);
   const [assets, setAssets] = useState<AssetDraft[]>([
     { type: "cash", name: "예금", current_value: "12000000" },
+    { type: "real_estate", name: "아파트", current_value: "420000000" },
   ]);
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
   const [history, setHistory] = useState<AnalysisResponse[]>([]);
