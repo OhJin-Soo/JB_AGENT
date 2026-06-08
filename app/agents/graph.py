@@ -59,19 +59,21 @@ def build_agent_graph(db: Session):
         intent = state["intent"]
         results: list[ToolResult] = []
 
-        if intent == AgentIntent.MONTHLY_FORECAST:
+        if intent == AgentIntent.EXTERNAL_WEATHER:
+            results.append(await fetch_weather_context())
+            results.append(get_analysis_summary(analysis))
+        elif intent == AgentIntent.EXTERNAL_REAL_ESTATE:
+            results.append(await fetch_real_estate_context())
+            results.append(get_analysis_summary(analysis))
+        elif intent == AgentIntent.EXTERNAL_SEARCH:
+            results.append(await search_web_context(state["question"]))
+            results.append(get_analysis_summary(analysis))
+        elif intent == AgentIntent.MONTHLY_FORECAST:
             results.append(get_monthly_forecast(analysis, state["question"]))
         elif intent == AgentIntent.CATEGORY_ANALYSIS:
             results.append(get_category_forecast(analysis, state["question"]))
         else:
             results.append(get_analysis_summary(analysis))
-
-        if intent == AgentIntent.EXTERNAL_WEATHER:
-            results.append(await fetch_weather_context())
-        elif intent == AgentIntent.EXTERNAL_REAL_ESTATE:
-            results.append(await fetch_real_estate_context())
-        elif intent == AgentIntent.EXTERNAL_SEARCH:
-            results.append(await search_web_context(state["question"]))
 
         results.append(validate_data_sufficiency(analysis, intent))
         state["tool_results"] = results

@@ -64,6 +64,7 @@ def test_create_get_history_and_chat() -> None:
     assert weather_chat.status_code == 200
     weather_data = weather_chat.json()
     assert weather_data["intent"] == "external_weather"
+    assert any("kma_sfcdd3.php" in item for item in weather_data["evidence"][:4])
     assert any("kma_sfcdd3.php" in item for item in weather_data["evidence"])
     assert any("tm1, tm2, stn, help, authKey" in item for item in weather_data["evidence"])
     assert not any("nx" in item or "base_date" in item for item in weather_data["evidence"])
