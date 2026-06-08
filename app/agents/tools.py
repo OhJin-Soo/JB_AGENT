@@ -1,8 +1,11 @@
 from dataclasses import dataclass, field
 from datetime import date
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+import httpx
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.schemas.analysis import AnalysisResponse
 from app.services.analysis import get_analysis
 from app.services.external.real_estate import RealEstateClient
@@ -160,6 +163,7 @@ async def search_web_context(question: str) -> ToolResult:
 async def fetch_weather_context() -> ToolResult:
     today = date.today()
     start_date = date(today.year - 5, today.month, today.day)
+    has_api_key = bool(get_settings().weather_api_key)
     api_spec = (
         "기능 명세서의 기상청 API는 apihub.kma.go.kr/api/typ01/url/kma_sfcdd3.php를 사용합니다. "
         "필수 인증키 환경변수는 WEATHER_API_KEY이며, 요청 파라미터는 tm1, tm2, stn, help, authKey입니다. "
@@ -168,15 +172,49 @@ async def fetch_weather_context() -> ToolResult:
     )
     try:
         raw = await WeatherClient().fetch_daily_weather(start_date=start_date, end_date=today)
-    except Exception as exc:
+    except RuntimeError as exc:
         return ToolResult(
             name="fetch_weather_context",
-            missing_data=["WEATHER_API_KEY 또는 기상 API 조회 결과"],
+            missing_data=["WEATHER_API_KEY"],
             content=f"{api_spec} 기상 데이터를 조회하지 못했습니다: {exc}",
             evidence=[
                 "기상청 API 명세: kma_sfcdd3.php",
                 "요청 파라미터: tm1, tm2, stn, help, authKey",
                 f"조회 예정 기간: {start_date:%Y%m%d}~{today:%Y%m%d}, stn=108",
+                "WEATHER_API_KEY가 현재 백엔드 설정에 로드되지 않았습니다.",
+            ],
+        )
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code
+        redacted_url = _redact_auth_key(str(exc.request.url))
+        return ToolResult(
+            name="fetch_weather_context",
+            missing_data=["기상 API 조회 결과"],
+            content=(
+                f"{api_spec} WEATHER_API_KEY는 백엔드 설정에 로드되어 있으나 "
+                f"기상청 API가 HTTP {status_code}를 반환했습니다. 요청 URL(키 마스킹): {redacted_url}"
+            ),
+            evidence=[
+                "기상청 API 명세: kma_sfcdd3.php",
+                "요청 파라미터: tm1, tm2, stn, help, authKey",
+                f"조회 예정 기간: {start_date:%Y%m%d}~{today:%Y%m%d}, stn=108",
+                "WEATHER_API_KEY는 백엔드 설정에 로드되어 있습니다.",
+                f"기상청 API 응답 상태: HTTP {status_code}",
+            ],
+        )
+    except Exception as exc:
+        return ToolResult(
+            name="fetch_weather_context",
+            missing_data=["기상 API 조회 결과"],
+            content=(
+                f"{api_spec} WEATHER_API_KEY 로드 여부: {has_api_key}. "
+                f"기상 데이터를 조회하지 못했습니다: {_sanitize_error(exc)}"
+            ),
+            evidence=[
+                "기상청 API 명세: kma_sfcdd3.php",
+                "요청 파라미터: tm1, tm2, stn, help, authKey",
+                f"조회 예정 기간: {start_date:%Y%m%d}~{today:%Y%m%d}, stn=108",
+                f"WEATHER_API_KEY 로드 여부: {has_api_key}",
             ],
         )
     return ToolResult(
@@ -213,8 +251,10 @@ def build_suggested_actions(missing_data: list[str]) -> list[str]:
     actions: list[str] = []
     if any("12개월" in item for item in missing_data):
         actions.append("최근 12개월 이상 현금흐름 데이터를 추가하세요.")
-    if any("기상" in item for item in missing_data):
+    if any(item == "WEATHER_API_KEY" for item in missing_data):
         actions.append("WEATHER_API_KEY를 설정하면 기상 데이터를 근거로 보강할 수 있습니다.")
+    elif any("기상 API" in item for item in missing_data):
+        actions.append("WEATHER_API_KEY의 권한, 유효성, 요청 기간, 기상청 API 응답 상태를 확인하세요.")
     if any("부동산" in item for item in missing_data):
         actions.append("REAL_ESTATE_API_KEY를 설정하면 부동산 통계를 순자산 분석에 반영할 수 있습니다.")
     if any("Tavily" in item for item in missing_data):
@@ -242,3 +282,16 @@ def _find_target_month(question: str, points):
         if f"{number}개월" in question or f"{number}달" in question:
             return points[number - 1]
     return None
+
+
+def _redact_auth_key(url: str) -> str:
+    parts = urlsplit(url)
+    query = [
+        (key, "***REDACTED***" if key.lower() == "authkey" else value)
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
+    ]
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+
+def _sanitize_error(exc: Exception) -> str:
+    return _redact_auth_key(str(exc))
