@@ -351,7 +351,7 @@ select:focus {
 
 .side-chat {
   display: grid;
-  grid-template-rows: auto minmax(240px, 1fr) auto;
+  grid-template-rows: auto minmax(240px, 1fr) auto auto;
   min-height: 100%;
   border: 1px solid #c9d8e8;
   border-radius: 8px;
@@ -524,6 +524,74 @@ select:focus {
   color: #40516b;
   background: #ffffff;
   font-size: 12px;
+}
+
+.suggestion-debug {
+  display: inline-flex;
+  margin-top: 9px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  color: #53647a;
+  background: #ffffff;
+  border: 1px solid #d4dde9;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.test-question-buttons {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border-top: 1px solid #e6ecf5;
+  background: #fbfcfe;
+}
+
+.test-question-buttons button {
+  min-height: 32px;
+  border: 1px dashed #aebccc;
+  border-radius: 6px;
+  padding: 7px 9px;
+  color: #40516b;
+  background: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+}
+
+.test-question-buttons button:hover:not(:disabled) {
+  border-color: #2563eb;
+  color: #1d4ed8;
+  background: #eff6ff;
+}
+
+.question-suggestions {
+  display: grid;
+  gap: 7px;
+  padding: 10px 12px 0;
+  border-top: 1px solid #e6ecf5;
+  background: #ffffff;
+}
+
+.question-suggestions button {
+  min-height: 34px;
+  border: 1px solid #c9d8e8;
+  border-radius: 6px;
+  padding: 7px 9px;
+  color: #0f5f59;
+  background: #f2faf8;
+  font-size: 13px;
+  font-weight: 750;
+  text-align: left;
+}
+
+.question-suggestions button:hover:not(:disabled) {
+  border-color: #0f766e;
+  background: #e7f5f3;
+}
+
+.question-suggestions button:disabled {
+  opacity: 0.58;
+  cursor: wait;
 }
 
 .chat-form {

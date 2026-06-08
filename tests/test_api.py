@@ -47,8 +47,12 @@ def test_create_get_history_and_chat() -> None:
     assert chat.json()["intent"] == "category_analysis"
     assert chat.json()["evidence"]
     assert chat.json()["confidence"] in {"low", "medium", "high"}
+    assert len(chat.json()["suggested_questions"]) <= 3
+    assert chat.json()["suggestion_status"] in {"generated", "fallback_generated"}
 
     monthly_chat = client.post("/chat", json={"question": "2개월 뒤 순자산은?", "analysis_id": analysis_id})
     assert monthly_chat.status_code == 200
     assert monthly_chat.json()["intent"] == "monthly_forecast"
     assert any("2026-05" in item for item in monthly_chat.json()["evidence"])
+    assert monthly_chat.json()["suggested_questions"]
+    assert monthly_chat.json()["suggestion_reason"]

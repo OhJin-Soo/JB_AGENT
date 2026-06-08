@@ -71,7 +71,15 @@ type ChatMessage = {
   evidence?: string[];
   confidence?: string;
   suggestedActions?: string[];
+  suggestionStatus?: string;
+  suggestionReason?: string | null;
 };
+
+const testQuestions = [
+  "전기요금 예측을 위해 기상청 API를 호출해줘",
+  "부동산 순자산 분석을 위해 부동산 통계 API를 호출해줘",
+  "최근 금리와 경제 상황을 Tavily로 검색해서 내 분석과 연결해줘",
+];
 
 const defaultCashflows: CashflowDraft[] = [
   { date: "2026-01-01", amount: "3000000", type: "income", category: "월급", description: "" },
@@ -98,6 +106,7 @@ function App() {
   const [question, setQuestion] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
+  const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([]);
 
   useEffect(() => {
     void loadHistory();
@@ -149,6 +158,8 @@ function App() {
       }
       const data = await response.json();
       setAnalysis(data);
+      setChatMessages([]);
+      setSuggestedQuestions([]);
       setActiveTab("analysis");
       await loadHistory();
     } catch (caught) {
@@ -161,17 +172,26 @@ function App() {
   async function sendQuestion(event: FormEvent) {
     event.preventDefault();
     if (!question.trim()) return;
-    const nextQuestion = question.trim();
+    await sendChatMessage(question.trim());
+  }
+
+  async function sendChatMessage(nextQuestion: string) {
     setQuestion("");
+    setSuggestedQuestions([]);
+    const conversation = chatMessages.map((message) => ({
+      role: message.role,
+      content: message.content,
+    }));
     setChatMessages((messages) => [...messages, { role: "user", content: nextQuestion }]);
     setChatLoading(true);
     try {
       const response = await fetch(`${API_BASE_URL}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: nextQuestion, analysis_id: analysis?.id ?? null }),
+        body: JSON.stringify({ question: nextQuestion, analysis_id: analysis?.id ?? null, conversation }),
       });
       const data = await response.json();
+      setSuggestedQuestions((data.suggested_questions ?? []).slice(0, 3));
       setChatMessages((messages) => [
         ...messages,
         {
@@ -180,6 +200,8 @@ function App() {
           evidence: data.evidence ?? [],
           confidence: data.confidence,
           suggestedActions: data.suggested_actions ?? [],
+          suggestionStatus: data.suggestion_status,
+          suggestionReason: data.suggestion_reason,
         },
       ]);
     } finally {
@@ -194,6 +216,9 @@ function App() {
   function updateAsset(index: number, patch: Partial<AssetDraft>) {
     setAssets((items) => items.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item)));
   }
+
+  const visibleSuggestedQuestions =
+    chatMessages.length === 0 ? buildInitialSuggestedQuestions(analysis) : suggestedQuestions;
 
   return (
     <main className="app-shell">
@@ -404,10 +429,36 @@ function App() {
                                     ))}
                                   </div>
                                 )}
+                                {message.suggestionStatus && (
+                                  <span className="suggestion-debug" title={message.suggestionReason ?? undefined}>
+                                    추천 {message.suggestionStatus}
+                                  </span>
+                                )}
                               </div>
                             ))}
                             {chatLoading && <div className="message assistant">답변 생성 중...</div>}
                           </div>
+                          <div className="test-question-buttons">
+                            {testQuestions.map((item) => (
+                              <button type="button" key={item} disabled={chatLoading} onClick={() => void sendChatMessage(item)}>
+                                {item}
+                              </button>
+                            ))}
+                          </div>
+                          {visibleSuggestedQuestions.length > 0 && (
+                            <div className="question-suggestions">
+                              {visibleSuggestedQuestions.slice(0, 3).map((item) => (
+                                <button
+                                  type="button"
+                                  key={item}
+                                  disabled={chatLoading}
+                                  onClick={() => void sendChatMessage(item)}
+                                >
+                                  {item}
+                                </button>
+                              ))}
+                            </div>
+                          )}
                           <form className="chat-form inline" onSubmit={sendQuestion}>
                             <input
                               value={question}
@@ -476,6 +527,16 @@ function EmptyState({ title, description }: { title: string; description: string
 
 function formatCurrency(value: number) {
   return `${Math.round(value).toLocaleString("ko-KR")}원`;
+}
+
+function buildInitialSuggestedQuestions(analysis: AnalysisResponse | null) {
+  if (!analysis) return [];
+  const forecastMonths = analysis.result.data_quality.forecast_months;
+  return [
+    "월별 순현금흐름을 알려줘",
+    "카테고리별 지출을 보여줘",
+    `${forecastMonths}개월 뒤 순자산은 얼마야?`,
+  ];
 }
 
 createRoot(document.getElementById("root")!).render(

@@ -1,3 +1,4 @@
+import json
 from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -19,7 +20,7 @@ from app.agents.tools import (
     validate_data_sufficiency,
 )
 from app.schemas.analysis import AnalysisResponse
-from app.schemas.chat import ChatRequest, ChatResponse
+from app.schemas.chat import ChatHistoryItem, ChatRequest, ChatResponse
 from app.services.llm import LLMClient
 
 
@@ -36,6 +37,10 @@ class AgentState(TypedDict):
     confidence: str
     needs_more_data: bool
     suggested_actions: list[str]
+    conversation: list[ChatHistoryItem]
+    suggested_questions: list[str]
+    suggestion_status: str
+    suggestion_reason: str | None
 
 
 def build_agent_graph(db: Session):
@@ -98,17 +103,37 @@ def build_agent_graph(db: Session):
         state["answer"] = llm_answer or deterministic_answer
         return state
 
+    async def generate_suggestions(state: AgentState) -> AgentState:
+        llm_suggestions, llm_status, llm_reason = await _generate_llm_suggested_questions(state)
+        if llm_suggestions:
+            state["suggested_questions"] = llm_suggestions
+            state["suggestion_status"] = "generated"
+            state["suggestion_reason"] = "llm_generated"
+            return state
+
+        fallback = _build_deterministic_suggested_questions(state)
+        state["suggested_questions"] = fallback
+        if fallback:
+            state["suggestion_status"] = "fallback_generated"
+            state["suggestion_reason"] = llm_reason or llm_status
+        else:
+            state["suggestion_status"] = llm_status
+            state["suggestion_reason"] = llm_reason
+        return state
+
     graph.add_node("classify", classify)
     graph.add_node("load_analysis", load_analysis)
     graph.add_node("execute_tools", execute_tools)
     graph.add_node("validate_evidence", validate_evidence)
     graph.add_node("generate_answer", generate_answer)
+    graph.add_node("generate_suggestions", generate_suggestions)
     graph.add_edge(START, "classify")
     graph.add_edge("classify", "load_analysis")
     graph.add_edge("load_analysis", "execute_tools")
     graph.add_edge("execute_tools", "validate_evidence")
     graph.add_edge("validate_evidence", "generate_answer")
-    graph.add_edge("generate_answer", END)
+    graph.add_edge("generate_answer", "generate_suggestions")
+    graph.add_edge("generate_suggestions", END)
     return graph.compile()
 
 
@@ -128,6 +153,10 @@ async def run_agent(request: ChatRequest, db: Session) -> ChatResponse:
             "confidence": "low",
             "needs_more_data": False,
             "suggested_actions": [],
+            "conversation": request.conversation,
+            "suggested_questions": [],
+            "suggestion_status": "none",
+            "suggestion_reason": None,
         }
     )
     return ChatResponse(
@@ -139,6 +168,9 @@ async def run_agent(request: ChatRequest, db: Session) -> ChatResponse:
         needs_more_data=final_state["needs_more_data"],
         missing_data=final_state["missing_data"],
         suggested_actions=final_state["suggested_actions"],
+        suggested_questions=final_state["suggested_questions"][:3],
+        suggestion_status=final_state["suggestion_status"],
+        suggestion_reason=final_state["suggestion_reason"],
     )
 
 
@@ -162,6 +194,40 @@ async def _generate_llm_answer(state: AgentState) -> str:
     return await LLMClient().answer(system_prompt, user_prompt)
 
 
+async def _generate_llm_suggested_questions(state: AgentState) -> tuple[list[str], str, str | None]:
+    if state["analysis"] is None:
+        return [], "no_analysis", "분석 결과가 없어 추천 질문을 만들 수 없습니다."
+    recent_turns = "\n".join(f"{item.role}: {item.content}" for item in state["conversation"][-6:])
+    system_prompt = (
+        "You suggest Korean follow-up questions for a financial analysis chat. Always return "
+        "only a JSON array with up to 3 short strings. Do not include what-if simulation questions."
+    )
+    user_prompt = (
+        f"Current question: {state['question']}\n"
+        f"Intent: {state['intent']}\n"
+        f"Answer: {state['answer']}\n"
+        f"Evidence: {'; '.join(state['evidence'][:6])}\n"
+        f"Missing data: {', '.join(state['missing_data']) or 'none'}\n"
+        f"Recent conversation:\n{recent_turns or 'none'}"
+    )
+    raw = await LLMClient().answer(system_prompt, user_prompt)
+    if not raw:
+        return [], "llm_unavailable", "LLM 응답이 없어 백엔드 fallback 추천을 사용합니다."
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return [], "parse_error", "LLM 추천 질문 응답을 JSON으로 파싱하지 못했습니다."
+    if not isinstance(parsed, list):
+        return [], "parse_error", "LLM 추천 질문 응답이 배열 형식이 아닙니다."
+    raw_questions = [item for item in parsed if isinstance(item, str)]
+    cleaned = _clean_suggested_questions(raw_questions)
+    if cleaned:
+        return cleaned, "generated", "llm_generated"
+    if raw_questions:
+        return [], "filtered", "LLM 추천 질문이 필터링되어 백엔드 fallback 추천을 사용합니다."
+    return [], "empty_by_llm", "LLM이 빈 추천 질문 배열을 반환했습니다."
+
+
 def _build_deterministic_answer(state: AgentState) -> str:
     if not state["tool_results"] or not state["evidence"]:
         missing = ", ".join(state["missing_data"]) or "분석 결과"
@@ -173,6 +239,65 @@ def _build_deterministic_answer(state: AgentState) -> str:
     if state["missing_data"]:
         missing_text = f" 다만 {', '.join(state['missing_data'])}가 부족해 신뢰도는 {state['confidence']}입니다."
     return f"{primary_content} 근거: {evidence_text}.{missing_text}"
+
+
+def _build_deterministic_suggested_questions(state: AgentState) -> list[str]:
+    if state["analysis"] is None:
+        return []
+    if state["conversation"]:
+        suggestions_by_intent = {
+            AgentIntent.MONTHLY_FORECAST: [
+                "카테고리별 지출도 보여줘",
+                "전체 분석 요약을 다시 알려줘",
+                "데이터 신뢰도는 어느 정도야?",
+            ],
+            AgentIntent.CATEGORY_ANALYSIS: [
+                "예측 종료 시점 순자산은 얼마야?",
+                "월별 순현금흐름을 알려줘",
+                "분석 데이터가 충분한지 알려줘",
+            ],
+            AgentIntent.EXTERNAL_WEATHER: [
+                "전기요금 카테고리 근거를 보여줘",
+                "기상 데이터 없이 계산된 부분은 뭐야?",
+                "월별 지출 예측을 알려줘",
+            ],
+            AgentIntent.EXTERNAL_REAL_ESTATE: [
+                "순자산 예측 근거를 보여줘",
+                "부동산 데이터 없이 계산된 부분은 뭐야?",
+                "예측 종료 시점 순자산은 얼마야?",
+            ],
+            AgentIntent.EXTERNAL_SEARCH: [
+                "검색 근거를 요약해줘",
+                "내 분석 결과와 연결해서 설명해줘",
+                "데이터 신뢰도는 어느 정도야?",
+            ],
+        }
+        return suggestions_by_intent.get(
+            state["intent"],
+            [
+                "월별 순현금흐름을 알려줘",
+                "카테고리별 지출을 보여줘",
+                "예측 종료 시점 순자산은 얼마야?",
+            ],
+        )[:3]
+    return [
+        "월별 순현금흐름을 알려줘",
+        "카테고리별 지출을 보여줘",
+        "예측 종료 시점 순자산은 얼마야?",
+    ]
+
+
+def _clean_suggested_questions(values: list[str]) -> list[str]:
+    blocked_keywords = ("what-if", "what if", "시뮬레이션", "줄이면", "오르면", "하락하면", "상승하면")
+    cleaned: list[str] = []
+    for value in values:
+        question = value.strip().strip('"').strip("'")
+        if not question or any(keyword in question.lower() for keyword in blocked_keywords):
+            continue
+        if len(question) > 80:
+            question = question[:80].rstrip()
+        cleaned.append(question)
+    return _dedupe(cleaned)[:3]
 
 
 def _dedupe(values: list[str]) -> list[str]:
