@@ -12,3 +12,8 @@ wheels/
 # Test/runtime artifacts
 .pytest_cache/
 *.db
+
+# Frontend artifacts
+node_modules/
+frontend/dist/
+*.tsbuildinfo

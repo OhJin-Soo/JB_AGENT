@@ -24,6 +24,16 @@ uv sync
 uv run uvicorn app.main:app --reload
 ```
 
+프론트엔드:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+기본 접속 주소는 `http://127.0.0.1:5173`입니다.
+
 ## 환경 변수
 
 ```bash
