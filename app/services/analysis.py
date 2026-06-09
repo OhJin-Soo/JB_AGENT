@@ -66,11 +66,15 @@ def _hydrate_result_metadata(result: AnalysisResult, request_json: str) -> None:
         )
         result.data_quality["real_estate_initial_value"] = round(real_estate_value, 2)
         result.data_quality["real_estate_monthly_growth_proxy"] = 0.0015 if real_estate_value else 0.0
-    if any(not category.forecast for category in result.categories):
+    if any(not category.observed or not category.forecast for category in result.categories):
         try:
             refreshed = run_rule_based_forecast(AnalysisRequest.model_validate(request_data))
         except Exception:
             return
-        forecast_by_key = {(category.category, category.type): category.forecast for category in refreshed.categories}
+        refreshed_by_key = {(category.category, category.type): category for category in refreshed.categories}
         for category in result.categories:
-            category.forecast = forecast_by_key.get((category.category, category.type), category.forecast)
+            refreshed_category = refreshed_by_key.get((category.category, category.type))
+            if refreshed_category is None:
+                continue
+            category.observed = category.observed or refreshed_category.observed
+            category.forecast = category.forecast or refreshed_category.forecast

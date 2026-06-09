@@ -60,6 +60,7 @@ class CategoryForecast(BaseModel):
     type: CashflowType
     model: str
     monthly_amount: float
+    observed: dict[str, float] = Field(default_factory=dict)
     forecast: dict[str, float] = Field(default_factory=dict)
 
 

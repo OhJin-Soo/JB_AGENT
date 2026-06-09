@@ -88,8 +88,8 @@ const testQuestions = [
 ];
 
 const defaultCashflows: CashflowDraft[] = [
-  ...Array.from({ length: 24 }, (_, index) => {
-    const year = index < 12 ? 2024 : 2025;
+  ...Array.from({ length: 30 }, (_, index) => {
+    const year = index < 12 ? 2024 : index < 24 ? 2025 : 2026;
     const monthNumber = (index % 12) + 1;
     const month = `${monthNumber}`.padStart(2, "0");
     return [
@@ -114,7 +114,7 @@ const defaultCashflows: CashflowDraft[] = [
 ];
 
 function App() {
-  const [title, setTitle] = useState("24개월 현금흐름 분석");
+  const [title, setTitle] = useState("30개월 현금흐름 분석");
   const [forecastMonths, setForecastMonths] = useState(6);
   const [cashflows, setCashflows] = useState<CashflowDraft[]>(defaultCashflows);
   const [assets, setAssets] = useState<AssetDraft[]>([

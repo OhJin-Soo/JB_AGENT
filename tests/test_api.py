@@ -7,7 +7,13 @@ from app.agents.graph import (
     _sanitize_llm_answer,
     _scope_tool_plan_for_intent,
 )
-from app.agents.tools import AgentIntent, _build_real_estate_projection, _parse_real_estate_change_rates, classify_question
+from app.agents.tools import (
+    AgentIntent,
+    _build_real_estate_projection,
+    _parse_real_estate_change_rates,
+    classify_question,
+    get_category_forecast,
+)
 from app.core.database import Base, engine
 from app.main import app
 from app.schemas.analysis import AnalysisResponse
@@ -183,7 +189,48 @@ def test_electricity_forecast_tool_plan_uses_category_model_and_drops_generic_se
     )
 
     assert {"name": "get_category_forecast", "arguments": {}} in scoped
+    assert {"name": "fetch_weather_context", "arguments": {}} not in scoped
     assert {"name": "search_web_context", "arguments": {}} not in scoped
+
+
+def test_electricity_category_question_only_returns_requested_month_without_model_when_not_asked() -> None:
+    analysis = AnalysisResponse.model_validate(
+        {
+            "id": 1,
+            "title": "electricity",
+            "created_at": "2026-06-09T00:00:00",
+            "result": {
+                "forecast": [
+                    {
+                        "month": "2026-07",
+                        "income": 3650000,
+                        "expense": 1300000,
+                        "net_cashflow": 2350000,
+                        "cumulative_cashflow": 2350000,
+                        "net_worth": 440000000,
+                    }
+                ],
+                "categories": [
+                    {
+                        "category": "전기요금",
+                        "type": "expense",
+                        "model": "sarimax",
+                        "monthly_amount": 187333,
+                        "observed": {"2026-01": 260000},
+                        "forecast": {"2026-07": 278000},
+                    }
+                ],
+                "summary": "summary",
+                "chart": {"labels": [], "income": [], "expense": [], "net_worth": []},
+                "data_quality": {"observed_months": 30, "forecast_months": 6},
+            },
+        }
+    )
+
+    result = get_category_forecast(analysis, "2026년 1월의 전기요금은 어떻게 돼?")
+
+    assert result.evidence == ["전기요금 2026-01 입력 데이터 기준 260,000원"]
+    assert not result.missing_data
 
 
 def test_real_estate_answer_does_not_append_duplicate_basis_label() -> None:
@@ -229,6 +276,30 @@ def test_real_estate_llm_answer_sanitizer_removes_basis_section_and_blocks_net_w
     )
     assert _sanitize_llm_answer(state, "6개월 후 순자산은 449,000,000원이고 예상 수입은 3,650,000원입니다.") == (
         "월 지가변동률 0.2500%를 적용하면 6개월 후 부동산 자산은 426,000,000원입니다."
+    )
+
+
+def test_electricity_answer_sanitizer_blocks_model_and_unrelated_cashflow_when_not_asked() -> None:
+    state = {
+        "intent": AgentIntent.EXTERNAL_WEATHER,
+        "question": "2026년 1월의 전기요금은 어떻게 돼?",
+        "tool_results": [
+            type(
+                "Result",
+                (),
+                {"content": "전기요금 카테고리는 2026-01 기준 값을 기준으로 답변합니다."},
+            )()
+        ],
+        "evidence": ["전기요금 2026-01 입력 데이터 기준 260,000원"],
+        "missing_data": [],
+        "confidence": "high",
+    }
+
+    assert _sanitize_llm_answer(state, "2026년 1월 전기요금은 260,000원이며 SARIMAX 기반입니다.") == (
+        "전기요금 2026-01 입력 데이터 기준 260,000원."
+    )
+    assert _sanitize_llm_answer(state, "2026년 1월 전기요금은 260,000원이고 순현금흐름은 2,000,000원입니다.") == (
+        "전기요금 2026-01 입력 데이터 기준 260,000원."
     )
 
 

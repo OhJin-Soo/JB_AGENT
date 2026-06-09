@@ -109,22 +109,23 @@ def get_category_forecast(analysis: AnalysisResponse | None, question: str) -> T
     ]
     if not selected:
         selected = categories
-    target_month = _find_target_month_key(question, [point.month for point in analysis.result.forecast])
+    available_months = _category_available_months(selected)
+    target_month = _find_target_month_key(question, available_months)
     evidence = [
-        _format_category_forecast_evidence(item, target_month)
+        _format_category_forecast_evidence(item, target_month, _asks_model_or_basis(question))
         for item in selected[:8]
     ]
     missing_data: list[str] = []
     if target_month is None and _asks_specific_month(question):
-        first = analysis.result.forecast[0].month
-        last = analysis.result.forecast[-1].month
+        first = available_months[0] if available_months else analysis.result.forecast[0].month
+        last = available_months[-1] if available_months else analysis.result.forecast[-1].month
         missing_data.append(f"요청 월이 현재 예측 범위 밖입니다. 현재 예측 범위: {first}~{last}")
     selected_text = ", ".join(item.category for item in selected[:3])
-    target_text = f"{target_month} 기준" if target_month else "예측 범위 기준"
+    target_text = f"{target_month} 기준" if target_month else "저장된 분석 기준"
     return ToolResult(
         name="get_category_forecast",
         content=(
-            f"{selected_text} 카테고리 예측은 저장된 분석 결과의 {target_text} 카테고리별 모델 예측값을 기준으로 합니다."
+            f"{selected_text} 카테고리는 {target_text} 값을 기준으로 답변합니다."
         ),
         evidence=evidence,
         missing_data=missing_data,
@@ -338,15 +339,31 @@ def _asks_specific_month(question: str) -> bool:
     return bool(re.search(r"\d{1,2}월", question) or "내년" in question or "개월" in question or "달" in question)
 
 
-def _format_category_forecast_evidence(item, target_month: str | None) -> str:
-    if target_month and item.forecast:
-        amount = item.forecast.get(target_month)
-        if amount is not None:
-            return (
-                f"{item.category}({item.type.value}) {target_month} 예측 {amount:,.0f}원, "
-                f"적용 모델 {item.model}"
-            )
-    return f"{item.category}({item.type.value}) 월평균 {item.monthly_amount:,.0f}원, 적용 모델 {item.model}"
+def _category_available_months(categories) -> list[str]:
+    months: set[str] = set()
+    for item in categories:
+        months.update(item.observed)
+        months.update(item.forecast)
+    return sorted(months)
+
+
+def _asks_model_or_basis(question: str) -> bool:
+    normalized = question.lower()
+    return any(keyword in normalized for keyword in ["모델", "근거", "sarimax", "xgboost", "왜", "어떻게 계산"])
+
+
+def _format_category_forecast_evidence(item, target_month: str | None, include_model: bool) -> str:
+    if target_month:
+        observed_amount = item.observed.get(target_month)
+        if observed_amount is not None:
+            text = f"{item.category} {target_month} 입력 데이터 기준 {observed_amount:,.0f}원"
+            return f"{text}, 적용 모델 {item.model}" if include_model else text
+        forecast_amount = item.forecast.get(target_month)
+        if forecast_amount is not None:
+            text = f"{item.category} {target_month} 예측 {forecast_amount:,.0f}원"
+            return f"{text}, 적용 모델 {item.model}" if include_model else text
+    text = f"{item.category} 월평균 {item.monthly_amount:,.0f}원"
+    return f"{text}, 적용 모델 {item.model}" if include_model else text
 
 
 def _parse_real_estate_change_rates(data: dict) -> dict:

@@ -26,7 +26,11 @@ def test_rule_based_forecast_returns_monthly_points() -> None:
     assert any(category.category == "전기요금" and category.model == "sarimax" for category in result.categories)
     assert any(category.category == "생활비" and category.model == "xgboost" for category in result.categories)
     electricity = next(category for category in result.categories if category.category == "전기요금")
+    assert electricity.observed
     assert electricity.forecast
+    assert set(electricity.observed) == {f"2024-{month:02d}" for month in range(1, 13)} | {
+        f"2025-{month:02d}" for month in range(1, 13)
+    }
     assert set(electricity.forecast) == {point.month for point in result.forecast}
     assert any(category.category == "연금" and category.model == "rule_based" for category in result.categories)
     assert result.data_quality["observed_months"] == 24

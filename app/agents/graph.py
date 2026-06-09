@@ -227,9 +227,15 @@ async def _generate_llm_answer(state: AgentState) -> str:
 
 def _answer_constraints_for_intent(intent: str, question: str) -> str:
     if intent == AgentIntent.EXTERNAL_WEATHER and _asks_electricity_forecast(question):
+        model_rule = (
+            "- 사용자가 모델/근거를 묻지 않았으면 SARIMAX, XGBoost 같은 모델명은 언급하지 않습니다."
+            if not _asks_model_or_basis_question(question)
+            else "- 사용자가 모델/근거를 물었으므로 적용 모델을 간단히 포함합니다."
+        )
         return (
             "- 전기요금 카테고리의 저장된 모델 예측값을 우선 사용합니다.\n"
-            "- 적용 모델(SARIMAX/XGBoost/rule_based)을 답변에 포함합니다.\n"
+            f"{model_rule}\n"
+            "- 월별 전체 수입, 전체 지출, 순현금흐름, 순자산은 언급하지 않습니다.\n"
             "- 기상청 결과는 외생변수 맥락으로만 설명하고, Tavily나 일반 기사 수치로 사용자의 전기요금 예측값을 대체하지 않습니다.\n"
             "- 요청 월이 예측 범위 밖이면 현재 예측 범위를 말하고 추가 예측 기간이 필요하다고 답합니다."
         )
@@ -251,6 +257,14 @@ def _answer_constraints_for_intent(intent: str, question: str) -> str:
 
 def _sanitize_llm_answer(state: AgentState, answer: str) -> str:
     cleaned = answer.strip()
+    if state["intent"] == AgentIntent.EXTERNAL_WEATHER and _asks_electricity_forecast(state["question"]):
+        blocked_terms = ("예상 수입", "예상 지출", "순현금흐름", "순자산")
+        mentions_model = any(term in cleaned.lower() for term in ["sarimax", "xgboost", "rule_based"])
+        if any(term in cleaned for term in blocked_terms) or (
+            mentions_model and not _asks_model_or_basis_question(state["question"])
+        ):
+            return _build_deterministic_answer(state)
+        return cleaned
     if state["intent"] != AgentIntent.EXTERNAL_REAL_ESTATE:
         return cleaned
     if "근거:" in cleaned:
@@ -265,6 +279,11 @@ def _sanitize_llm_answer(state: AgentState, answer: str) -> str:
 def _asks_net_worth_question(question: str) -> bool:
     normalized = question.lower()
     return any(keyword in normalized for keyword in ["순자산", "전체 자산", "총자산", "net worth"])
+
+
+def _asks_model_or_basis_question(question: str) -> bool:
+    normalized = question.lower()
+    return any(keyword in normalized for keyword in ["모델", "근거", "sarimax", "xgboost", "왜", "어떻게 계산"])
 
 
 async def _plan_tools_with_llm(state: AgentState) -> tuple[list[dict], str, str | None]:
@@ -326,10 +345,13 @@ def _scope_tool_plan_for_intent(intent: str, question: str, has_analysis: bool, 
         real_estate_calls = [call for call in plan if call.get("name") == "fetch_real_estate_context"]
         return real_estate_calls or _fallback_tool_plan(intent)
     if intent == AgentIntent.EXTERNAL_WEATHER and has_analysis and _asks_electricity_forecast(question):
-        scoped = plan if _asks_explicit_search(question) else [call for call in plan if call.get("name") != "search_web_context"]
-        scoped = _ensure_tool_call(scoped, "get_category_forecast")
+        allowed = {"get_category_forecast"}
         if _asks_weather_api_context(question):
-            scoped = _ensure_tool_call(scoped, "fetch_weather_context")
+            allowed.add("fetch_weather_context")
+        if _asks_explicit_search(question):
+            allowed.add("search_web_context")
+        scoped = [call for call in plan if call.get("name") in allowed]
+        scoped = _ensure_tool_call(scoped, "get_category_forecast")
         return _dedupe_tool_calls(scoped)
     return plan
 
@@ -429,6 +451,9 @@ def _build_deterministic_answer(state: AgentState) -> str:
         return f"답변에 필요한 데이터가 부족합니다. 부족한 데이터: {missing}."
 
     primary_content = next((result.content for result in state["tool_results"] if result.content), "")
+    if state["intent"] == AgentIntent.EXTERNAL_WEATHER and _asks_electricity_forecast(state["question"]):
+        category_evidence = next((item for item in state["evidence"] if "전기요금" in item), "")
+        return f"{category_evidence}." if category_evidence else primary_content
     if state["intent"] == AgentIntent.EXTERNAL_REAL_ESTATE:
         return primary_content
 
