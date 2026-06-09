@@ -102,15 +102,12 @@ def build_agent_graph(db: Session):
 
     async def generate_answer(state: AgentState) -> AgentState:
         deterministic_answer = _build_deterministic_answer(state)
-        if state["intent"] == AgentIntent.EXTERNAL_REAL_ESTATE:
-            state["answer"] = deterministic_answer
-            return state
         if not state["evidence"]:
             state["answer"] = deterministic_answer
             return state
 
         llm_answer = await _generate_llm_answer(state)
-        state["answer"] = llm_answer or deterministic_answer
+        state["answer"] = _sanitize_llm_answer(state, llm_answer) if llm_answer else deterministic_answer
         return state
 
     async def generate_suggestions(state: AgentState) -> AgentState:
@@ -206,17 +203,58 @@ async def _generate_llm_answer(state: AgentState) -> str:
         "and authKey. Do not mention nx, ny, base_date, or base_time unless they appear in "
         "the tool results. For real estate asset questions, prioritize fetch_real_estate_context "
         "results over generic monthly net-worth results because it combines the real-estate API "
-        "rate with the user's real-estate asset value."
+        "rate with the user's real-estate asset value. If the user asks how their real-estate "
+        "asset changes, answer only about the real-estate asset value. Do not mention monthly "
+        "income, expense, net cashflow, or net worth unless the user explicitly asks for net worth. "
+        "For real-estate asset answers, naturally include the applied land-price change rate and "
+        "the calculation basis inside the paragraph. Do not append a separate '근거:' section."
     )
+    answer_constraints = _answer_constraints_for_intent(state["intent"], state["question"])
     user_prompt = (
         f"Intent: {state['intent']}\n"
         f"Question: {state['question']}\n"
+        f"Answer constraints:\n{answer_constraints}\n"
         f"Tool plan status: {state['tool_plan_status']} ({state['tool_plan_reason'] or 'no reason'})\n"
         f"Tool results:\n{context}\n"
         f"Missing data: {', '.join(state['missing_data']) or 'none'}\n"
         f"Evidence: {'; '.join(state['evidence']) or 'none'}"
     )
     return await LLMClient().answer(system_prompt, user_prompt)
+
+
+def _answer_constraints_for_intent(intent: str, question: str) -> str:
+    if intent != AgentIntent.EXTERNAL_REAL_ESTATE:
+        return "- 일반 답변 제약만 적용합니다."
+    if any(keyword in question.lower() for keyword in ["순자산", "전체 자산", "총자산", "net worth"]):
+        return (
+            "- 부동산 API 지가변동률과 현재 부동산 자산 기준값을 사용해 답변합니다.\n"
+            "- 보정 순자산을 함께 언급하되, 월별 수입/지출/순현금흐름은 사용자가 묻지 않았으면 생략합니다.\n"
+            "- '근거:' 같은 별도 라벨을 붙이지 말고 자연스러운 문단으로 답합니다."
+        )
+    return (
+        "- 부동산 자산 가치 변화만 답합니다.\n"
+        "- 월별 수입, 지출, 순현금흐름, 순자산은 언급하지 않습니다.\n"
+        "- 최근 12개월 평균 월 지가변동률, 현재 부동산 자산 기준값, 적용 기간을 자연스럽게 포함합니다.\n"
+        "- '근거:' 같은 별도 라벨을 붙이지 말고 자연스러운 문단으로 답합니다."
+    )
+
+
+def _sanitize_llm_answer(state: AgentState, answer: str) -> str:
+    cleaned = answer.strip()
+    if state["intent"] != AgentIntent.EXTERNAL_REAL_ESTATE:
+        return cleaned
+    if "근거:" in cleaned:
+        cleaned = cleaned.split("근거:", 1)[0].strip()
+    if not _asks_net_worth_question(state["question"]):
+        blocked_terms = ("예상 수입", "예상 지출", "순현금흐름", "순자산")
+        if any(term in cleaned for term in blocked_terms):
+            return _build_deterministic_answer(state)
+    return cleaned
+
+
+def _asks_net_worth_question(question: str) -> bool:
+    normalized = question.lower()
+    return any(keyword in normalized for keyword in ["순자산", "전체 자산", "총자산", "net worth"])
 
 
 async def _plan_tools_with_llm(state: AgentState) -> tuple[list[dict], str, str | None]:
@@ -342,14 +380,6 @@ def _build_deterministic_answer(state: AgentState) -> str:
 
     primary_content = next((result.content for result in state["tool_results"] if result.content), "")
     if state["intent"] == AgentIntent.EXTERNAL_REAL_ESTATE:
-        basis = [
-            item
-            for item in state["evidence"]
-            if "적용 지가변동률" in item or "계산식" in item or "가치 변동분" in item
-        ]
-        basis_text = " / ".join(basis[:3])
-        if basis_text:
-            return f"{primary_content} 근거: {basis_text}."
         return primary_content
 
     evidence_text = " / ".join(state["evidence"][:4])

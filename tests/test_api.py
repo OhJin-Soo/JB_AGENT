@@ -1,6 +1,12 @@
 from fastapi.testclient import TestClient
 
-from app.agents.graph import _build_korean_tool_plan_reason, _clean_suggested_questions, _scope_tool_plan_for_intent
+from app.agents.graph import (
+    _build_deterministic_answer,
+    _build_korean_tool_plan_reason,
+    _clean_suggested_questions,
+    _sanitize_llm_answer,
+    _scope_tool_plan_for_intent,
+)
 from app.agents.tools import AgentIntent, _build_real_estate_projection, _parse_real_estate_change_rates, classify_question
 from app.core.database import Base, engine
 from app.main import app
@@ -153,7 +159,7 @@ def test_real_estate_api_projection_adjusts_asset_value() -> None:
     assert parsed["average_monthly_rate"] == 0.25
     assert projection["missing_data"] == []
     assert any("6개월 후 API 기반 부동산 예상 가치" in item for item in projection["evidence"])
-    assert "최근 12개월 평균 월 지가변동률 0.2500%" in projection["content"]
+    assert "최근 12개월 평균 월 지가변동률 0.2500%를 현재 부동산 자산" in projection["content"]
     assert "보정 순자산" not in projection["content"]
 
 
@@ -164,6 +170,52 @@ def test_real_estate_tool_plan_drops_generic_monthly_forecast() -> None:
     )
 
     assert scoped == [{"name": "fetch_real_estate_context", "arguments": {}}]
+
+
+def test_real_estate_answer_does_not_append_duplicate_basis_label() -> None:
+    answer = _build_deterministic_answer(
+        {
+            "intent": AgentIntent.EXTERNAL_REAL_ESTATE,
+            "tool_results": [
+                type(
+                    "Result",
+                    (),
+                    {
+                        "content": "월 지가변동률 0.2500%를 적용하면 6개월 후 부동산 자산은 426,000,000원입니다."
+                    },
+                )()
+            ],
+            "evidence": ["적용 지가변동률: 최근 12개월 평균 월 0.2500%"],
+            "missing_data": [],
+            "confidence": "high",
+        }
+    )
+
+    assert "근거:" not in answer
+
+
+def test_real_estate_llm_answer_sanitizer_removes_basis_section_and_blocks_net_worth() -> None:
+    state = {
+        "intent": AgentIntent.EXTERNAL_REAL_ESTATE,
+        "question": "내 부동산 자산이 6개월 후에 어떻게 될까?",
+        "tool_results": [
+            type(
+                "Result",
+                (),
+                {"content": "월 지가변동률 0.2500%를 적용하면 6개월 후 부동산 자산은 426,000,000원입니다."},
+            )()
+        ],
+        "evidence": ["적용 지가변동률: 최근 12개월 평균 월 0.2500%"],
+        "missing_data": [],
+        "confidence": "high",
+    }
+
+    assert _sanitize_llm_answer(state, "6개월 후 부동산 자산은 426,000,000원입니다. 근거: 계산식") == (
+        "6개월 후 부동산 자산은 426,000,000원입니다."
+    )
+    assert _sanitize_llm_answer(state, "6개월 후 순자산은 449,000,000원이고 예상 수입은 3,650,000원입니다.") == (
+        "월 지가변동률 0.2500%를 적용하면 6개월 후 부동산 자산은 426,000,000원입니다."
+    )
 
 
 def build_sample_cashflows() -> list[dict]:

@@ -379,12 +379,12 @@ def _build_real_estate_projection(
                 f"{target.month} 부동산 API 보정 순자산: {adjusted_net_worth:,.0f}원",
                 f"기존 프록시 대비 순자산 보정분: {adjusted_delta:,.0f}원",
             ]
-        )
+    )
     content = (
-        f"{horizon}개월 후 부동산 자산은 {api_real_estate_value:,.0f}원으로 추정됩니다. "
-        f"근거는 부동산 통계 API에서 조회한 최근 12개월 평균 월 지가변동률 "
-        f"{parsed['average_monthly_rate']:.4f}%입니다. 계산은 현재 부동산 자산 "
-        f"{real_estate_value:,.0f}원에 월 지가변동률을 {horizon}개월 복리로 적용했습니다."
+        f"부동산 통계 API에서 조회한 최근 12개월 평균 월 지가변동률 "
+        f"{parsed['average_monthly_rate']:.4f}%를 현재 부동산 자산 {real_estate_value:,.0f}원에 "
+        f"{horizon}개월 복리로 적용하면, {horizon}개월 후 부동산 자산은 "
+        f"{api_real_estate_value:,.0f}원으로 추정됩니다."
     )
     if _asks_net_worth(question):
         content += f" 이를 반영한 {target.month} 보정 순자산은 {adjusted_net_worth:,.0f}원입니다."
