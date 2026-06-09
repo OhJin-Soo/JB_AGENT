@@ -491,7 +491,7 @@ function App() {
                                       <span title={message.toolPlanReason ?? undefined}>
                                         tool {formatDebugStatus(message.toolPlanStatus)}
                                         {message.toolCalls && message.toolCalls.length > 0
-                                          ? `: ${message.toolCalls.join(", ")}`
+                                          ? `: ${message.toolCalls.map(formatToolCallLabel).join(", ")}`
                                           : ""}
                                         {message.toolPlanReason ? ` (${message.toolPlanReason})` : ""}
                                       </span>
@@ -601,6 +601,18 @@ function formatDebugStatus(status: string) {
     none: "없음",
   };
   return labels[status] ?? status;
+}
+
+function formatToolCallLabel(name: string) {
+  const labels: Record<string, string> = {
+    get_analysis_summary: "분석 요약 조회",
+    get_monthly_forecast: "월별 예측 조회",
+    get_category_forecast: "카테고리 예측 조회",
+    fetch_weather_context: "기상 정보 조회",
+    fetch_real_estate_context: "부동산 외부 데이터 조회",
+    search_web_context: "외부 정보 검색",
+  };
+  return labels[name] ?? name;
 }
 
 function buildInitialSuggestedQuestions(analysis: AnalysisResponse | null) {

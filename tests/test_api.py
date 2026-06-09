@@ -117,7 +117,7 @@ def test_tool_plan_reason_is_korean_and_deterministic() -> None:
         [{"name": "get_analysis_summary", "arguments": {}}, {"name": "get_category_forecast", "arguments": {}}]
     )
 
-    assert reason == "저장된 분석 결과 요약을 조회하기 위해, 카테고리별 예측과 적용 모델을 조회하기 위해"
+    assert reason == "저장된 분석 결과를 확인하기 위해, 카테고리별 예측 결과를 확인하기 위해"
 
 
 def test_real_estate_question_uses_real_estate_intent_before_monthly_forecast() -> None:

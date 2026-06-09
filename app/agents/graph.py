@@ -409,12 +409,12 @@ def _dedupe_tool_calls(plan: list[dict]) -> list[dict]:
 
 def _build_korean_tool_plan_reason(calls: list[dict]) -> str:
     tool_reasons = {
-        "get_analysis_summary": "저장된 분석 결과 요약을 조회하기 위해",
-        "get_monthly_forecast": "월별 예측값을 조회하기 위해",
-        "get_category_forecast": "카테고리별 예측과 적용 모델을 조회하기 위해",
-        "fetch_weather_context": "기상청 API 기반 기상 데이터를 조회하기 위해",
-        "fetch_real_estate_context": "부동산 통계 API 데이터를 조회하기 위해",
-        "search_web_context": "Tavily 검색으로 최신 외부 정보를 조회하기 위해",
+        "get_analysis_summary": "저장된 분석 결과를 확인하기 위해",
+        "get_monthly_forecast": "지정한 시점의 예측 결과를 확인하기 위해",
+        "get_category_forecast": "카테고리별 예측 결과를 확인하기 위해",
+        "fetch_weather_context": "기상 정보를 확인하기 위해",
+        "fetch_real_estate_context": "부동산 관련 외부 데이터를 확인하기 위해",
+        "search_web_context": "최신 외부 정보를 확인하기 위해",
     }
     reasons = [tool_reasons.get(str(call.get("name"))) for call in calls]
     reasons = [reason for reason in reasons if reason]
