@@ -67,9 +67,13 @@ def build_agent_graph(db: Session):
     async def execute_tools(state: AgentState) -> AgentState:
         results: list[ToolResult] = []
         plan = state["tool_plan"] or _fallback_tool_plan(state["intent"])
+        plan = _scope_tool_plan_for_intent(state["intent"], plan)
         if not state["tool_plan"]:
             state["tool_plan_status"] = "fallback_generated"
             state["tool_plan_reason"] = state["tool_plan_reason"] or "LLM tool plan을 사용할 수 없어 intent fallback을 사용했습니다."
+        state["tool_plan"] = plan
+        if state["intent"] == AgentIntent.EXTERNAL_REAL_ESTATE:
+            state["tool_plan_reason"] = _build_korean_tool_plan_reason(plan)
 
         for call in plan[:5]:
             name = str(call.get("name", ""))
@@ -98,6 +102,9 @@ def build_agent_graph(db: Session):
 
     async def generate_answer(state: AgentState) -> AgentState:
         deterministic_answer = _build_deterministic_answer(state)
+        if state["intent"] == AgentIntent.EXTERNAL_REAL_ESTATE:
+            state["answer"] = deterministic_answer
+            return state
         if not state["evidence"]:
             state["answer"] = deterministic_answer
             return state
@@ -266,6 +273,13 @@ def _fallback_tool_plan(intent: str) -> list[dict]:
     return [{"name": name, "arguments": {}} for name in fallback_tool_names_for_intent(intent)]
 
 
+def _scope_tool_plan_for_intent(intent: str, plan: list[dict]) -> list[dict]:
+    if intent != AgentIntent.EXTERNAL_REAL_ESTATE:
+        return plan
+    real_estate_calls = [call for call in plan if call.get("name") == "fetch_real_estate_context"]
+    return real_estate_calls or _fallback_tool_plan(intent)
+
+
 def _build_korean_tool_plan_reason(calls: list[dict]) -> str:
     tool_reasons = {
         "get_analysis_summary": "저장된 분석 결과 요약을 조회하기 위해",
@@ -327,6 +341,17 @@ def _build_deterministic_answer(state: AgentState) -> str:
         return f"답변에 필요한 데이터가 부족합니다. 부족한 데이터: {missing}."
 
     primary_content = next((result.content for result in state["tool_results"] if result.content), "")
+    if state["intent"] == AgentIntent.EXTERNAL_REAL_ESTATE:
+        basis = [
+            item
+            for item in state["evidence"]
+            if "적용 지가변동률" in item or "계산식" in item or "가치 변동분" in item
+        ]
+        basis_text = " / ".join(basis[:3])
+        if basis_text:
+            return f"{primary_content} 근거: {basis_text}."
+        return primary_content
+
     evidence_text = " / ".join(state["evidence"][:4])
     missing_text = ""
     if state["missing_data"]:

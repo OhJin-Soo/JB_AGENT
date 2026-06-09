@@ -363,19 +363,37 @@ def _build_real_estate_projection(
     evidence.extend(
         [
             f"입력 부동산 자산 기준값: {real_estate_value:,.0f}원",
+            f"적용 지가변동률: 최근 12개월 평균 월 {parsed['average_monthly_rate']:.4f}%",
+            (
+                f"계산식: {real_estate_value:,.0f}원 x "
+                f"(1 + {api_monthly_growth:.6f})^{horizon} = {api_real_estate_value:,.0f}원"
+            ),
             f"{horizon}개월 후 API 기반 부동산 예상 가치: {api_real_estate_value:,.0f}원",
             f"{horizon}개월 후 API 기반 부동산 가치 변동분: {api_change:,.0f}원",
-            f"{target.month} 기존 순자산 예측값: {target.net_worth:,.0f}원",
-            f"{target.month} 부동산 API 보정 순자산: {adjusted_net_worth:,.0f}원",
-            f"기존 프록시 대비 순자산 보정분: {adjusted_delta:,.0f}원",
         ]
     )
+    if _asks_net_worth(question):
+        evidence.extend(
+            [
+                f"{target.month} 기존 순자산 예측값: {target.net_worth:,.0f}원",
+                f"{target.month} 부동산 API 보정 순자산: {adjusted_net_worth:,.0f}원",
+                f"기존 프록시 대비 순자산 보정분: {adjusted_delta:,.0f}원",
+            ]
+        )
     content = (
-        f"부동산 API의 최근 12개월 평균 월 지가변동률 {parsed['average_monthly_rate']:.4f}%를 적용하면 "
         f"{horizon}개월 후 부동산 자산은 {api_real_estate_value:,.0f}원으로 추정됩니다. "
-        f"이를 반영한 {target.month} 보정 순자산은 {adjusted_net_worth:,.0f}원입니다."
+        f"근거는 부동산 통계 API에서 조회한 최근 12개월 평균 월 지가변동률 "
+        f"{parsed['average_monthly_rate']:.4f}%입니다. 계산은 현재 부동산 자산 "
+        f"{real_estate_value:,.0f}원에 월 지가변동률을 {horizon}개월 복리로 적용했습니다."
     )
+    if _asks_net_worth(question):
+        content += f" 이를 반영한 {target.month} 보정 순자산은 {adjusted_net_worth:,.0f}원입니다."
     return {"content": content, "evidence": evidence, "missing_data": missing_data}
+
+
+def _asks_net_worth(question: str) -> bool:
+    normalized = question.lower()
+    return any(keyword in normalized for keyword in ["순자산", "전체 자산", "총자산", "net worth"])
 
 
 def _iter_dicts(value):

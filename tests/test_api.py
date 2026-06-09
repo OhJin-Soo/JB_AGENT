@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from app.agents.graph import _build_korean_tool_plan_reason, _clean_suggested_questions
+from app.agents.graph import _build_korean_tool_plan_reason, _clean_suggested_questions, _scope_tool_plan_for_intent
 from app.agents.tools import AgentIntent, _build_real_estate_projection, _parse_real_estate_change_rates, classify_question
 from app.core.database import Base, engine
 from app.main import app
@@ -153,7 +153,17 @@ def test_real_estate_api_projection_adjusts_asset_value() -> None:
     assert parsed["average_monthly_rate"] == 0.25
     assert projection["missing_data"] == []
     assert any("6개월 후 API 기반 부동산 예상 가치" in item for item in projection["evidence"])
-    assert "보정 순자산" in projection["content"]
+    assert "최근 12개월 평균 월 지가변동률 0.2500%" in projection["content"]
+    assert "보정 순자산" not in projection["content"]
+
+
+def test_real_estate_tool_plan_drops_generic_monthly_forecast() -> None:
+    scoped = _scope_tool_plan_for_intent(
+        AgentIntent.EXTERNAL_REAL_ESTATE,
+        [{"name": "get_monthly_forecast", "arguments": {}}, {"name": "fetch_real_estate_context", "arguments": {}}],
+    )
+
+    assert scoped == [{"name": "fetch_real_estate_context", "arguments": {}}]
 
 
 def build_sample_cashflows() -> list[dict]:

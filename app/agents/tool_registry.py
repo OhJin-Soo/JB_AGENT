@@ -101,7 +101,7 @@ def fallback_tool_names_for_intent(intent: str) -> list[str]:
     if intent == AgentIntent.EXTERNAL_WEATHER:
         return ["fetch_weather_context", "get_analysis_summary"]
     if intent == AgentIntent.EXTERNAL_REAL_ESTATE:
-        return ["fetch_real_estate_context", "get_monthly_forecast"]
+        return ["fetch_real_estate_context"]
     if intent == AgentIntent.EXTERNAL_SEARCH:
         return ["search_web_context", "get_analysis_summary"]
     if intent == AgentIntent.MONTHLY_FORECAST:
