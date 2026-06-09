@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from app.agents.graph import _clean_suggested_questions
+from app.agents.graph import _build_korean_tool_plan_reason, _clean_suggested_questions
 from app.core.database import Base, engine
 from app.main import app
 
@@ -90,6 +90,14 @@ def test_suggested_question_guardrail_filters_meta_questions() -> None:
     )
 
     assert cleaned == ["월별 순현금흐름을 알려줘", "전기요금 카테고리 근거를 보여줘"]
+
+
+def test_tool_plan_reason_is_korean_and_deterministic() -> None:
+    reason = _build_korean_tool_plan_reason(
+        [{"name": "get_analysis_summary", "arguments": {}}, {"name": "get_category_forecast", "arguments": {}}]
+    )
+
+    assert reason == "저장된 분석 결과 요약을 조회하기 위해, 카테고리별 예측과 적용 모델을 조회하기 위해"
 
 
 def build_sample_cashflows() -> list[dict]:

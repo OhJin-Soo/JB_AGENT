@@ -215,7 +215,8 @@ async def _plan_tools_with_llm(state: AgentState) -> tuple[list[dict], str, str 
     system_prompt = (
         "You are a tool planner for a Korean financial analysis agent. Return only valid JSON. "
         "Do not answer the user. Choose the minimal required tools from the catalog. "
-        "Return at most 5 tool calls. Never invent tool names or arguments."
+        "Return at most 5 tool calls. Never invent tool names or arguments. "
+        "The reason field must be written in Korean."
     )
     user_prompt = (
         f"Question: {state['question']}\n"
@@ -224,7 +225,7 @@ async def _plan_tools_with_llm(state: AgentState) -> tuple[list[dict], str, str 
         f"Recent conversation:\n{recent_turns or 'none'}\n\n"
         f"Tool catalog:\n{tool_catalog_for_prompt()}\n\n"
         "Return JSON with this exact shape:\n"
-        '{"tool_calls":[{"name":"tool_name","arguments":{}}],"reason":"short reason"}'
+        '{"tool_calls":[{"name":"tool_name","arguments":{}}],"reason":"한국어로 작성한 짧은 이유"}'
     )
     raw = await LLMClient().answer(system_prompt, user_prompt)
     if not raw:
@@ -253,8 +254,7 @@ async def _plan_tools_with_llm(state: AgentState) -> tuple[list[dict], str, str 
         calls.append({"name": name, "arguments": arguments if isinstance(arguments, dict) else {}})
 
     if calls:
-        reason = parsed.get("reason")
-        return calls, "llm_planned", reason if isinstance(reason, str) else "LLM이 tool plan을 생성했습니다."
+        return calls, "llm_planned", _build_korean_tool_plan_reason(calls)
     if invalid_names:
         return [], "invalid_tool", f"허용되지 않은 tool이 포함되어 intent fallback을 사용합니다: {', '.join(invalid_names)}"
     return [], "empty_by_llm", "LLM이 tool call을 생성하지 않아 intent fallback을 사용합니다."
@@ -262,6 +262,24 @@ async def _plan_tools_with_llm(state: AgentState) -> tuple[list[dict], str, str 
 
 def _fallback_tool_plan(intent: str) -> list[dict]:
     return [{"name": name, "arguments": {}} for name in fallback_tool_names_for_intent(intent)]
+
+
+def _build_korean_tool_plan_reason(calls: list[dict]) -> str:
+    tool_reasons = {
+        "get_analysis_summary": "저장된 분석 결과 요약을 조회하기 위해",
+        "get_monthly_forecast": "월별 예측값을 조회하기 위해",
+        "get_category_forecast": "카테고리별 예측과 적용 모델을 조회하기 위해",
+        "fetch_weather_context": "기상청 API 기반 기상 데이터를 조회하기 위해",
+        "fetch_real_estate_context": "부동산 통계 API 데이터를 조회하기 위해",
+        "search_web_context": "Tavily 검색으로 최신 외부 정보를 조회하기 위해",
+    }
+    reasons = [tool_reasons.get(str(call.get("name"))) for call in calls]
+    reasons = [reason for reason in reasons if reason]
+    if not reasons:
+        return "LLM이 질문 의도에 맞는 tool plan을 생성했습니다."
+    if len(reasons) == 1:
+        return reasons[0]
+    return ", ".join(reasons)
 
 
 async def _generate_llm_suggested_questions(state: AgentState) -> tuple[list[str], str, str | None]:
