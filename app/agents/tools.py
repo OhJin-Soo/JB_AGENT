@@ -111,7 +111,10 @@ def get_category_forecast(analysis: AnalysisResponse | None, question: str) -> T
         selected = categories
     available_months = _category_available_months(selected)
     forecast_months = _category_forecast_months(selected)
-    target_month = _find_target_month_key(question, available_months)
+    target_month = _find_target_month_key(
+        question,
+        forecast_months if _asks_forecast_question(question) else available_months,
+    )
     include_model = _asks_model_or_basis(question)
     observed_month_count = int(analysis.result.data_quality.get("observed_months", 0))
     evidence = [
@@ -122,13 +125,13 @@ def get_category_forecast(analysis: AnalysisResponse | None, question: str) -> T
     if target_month is None and _asks_specific_month(question):
         first = forecast_months[0] if forecast_months else analysis.result.forecast[0].month
         last = forecast_months[-1] if forecast_months else analysis.result.forecast[-1].month
-        missing_data.append(f"요청 월이 현재 예측 범위 밖입니다. 현재 예측 범위: {first}~{last}")
+        missing_data.append(f"요청 월이 현재 예측 기간 밖입니다. 현재 예측 기간: {first}~{last}")
     selected_text = ", ".join(item.category for item in selected[:3])
     target_text = f"{target_month} 기준" if target_month else "저장된 분석 기준"
     if target_month is None and _asks_specific_month(question):
         return ToolResult(
             name="get_category_forecast",
-            content=f"요청 월은 현재 예측 범위 밖입니다. 현재 예측 범위는 {first}~{last}입니다.",
+            content=f"요청 월은 현재 예측 기간 밖입니다. 현재 예측 기간은 {first}~{last}입니다.",
             evidence=evidence,
             missing_data=missing_data,
         )
@@ -352,6 +355,11 @@ def _find_target_month_key(question: str, forecast_months: list[str]) -> str | N
 
 def _asks_specific_month(question: str) -> bool:
     return bool(re.search(r"\d{1,2}월", question) or "내년" in question or "개월" in question or "달" in question)
+
+
+def _asks_forecast_question(question: str) -> bool:
+    normalized = question.lower()
+    return any(keyword in normalized for keyword in ["예측", "예상", "얼마", "될까", "어떻게 될", "내년"])
 
 
 def _category_available_months(categories) -> list[str]:
