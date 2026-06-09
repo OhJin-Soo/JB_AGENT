@@ -9,11 +9,11 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 
 
 @router.get("/analyses/{analysis_id}.pdf")
-def download_report_endpoint(analysis_id: int, db: Session = Depends(get_db)) -> Response:
+async def download_report_endpoint(analysis_id: int, db: Session = Depends(get_db)) -> Response:
     analysis = get_analysis(analysis_id, db)
     if analysis is None:
         raise HTTPException(status_code=404, detail="Analysis not found.")
-    pdf_bytes = build_pdf_report(analysis)
+    pdf_bytes = await build_pdf_report(analysis)
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
