@@ -526,20 +526,26 @@ select:focus {
   font-size: 12px;
 }
 
-.suggestion-debug {
-  display: inline-flex;
+.debug-details {
+  display: grid;
+  gap: 5px;
   margin-top: 9px;
-  padding: 2px 7px;
+}
+
+.debug-details span {
+  padding: 6px 7px;
   border-radius: 6px;
   color: #53647a;
   background: #ffffff;
   border: 1px solid #d4dde9;
   font-size: 11px;
-  font-weight: 750;
+  font-weight: 700;
+  line-height: 1.35;
 }
 
 .test-question-buttons {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
   padding: 10px 12px;
   border-top: 1px solid #e6ecf5;
@@ -631,6 +637,10 @@ select:focus {
 
   .side-chat {
     min-height: 420px;
+  }
+
+  .test-question-buttons {
+    grid-template-columns: 1fr;
   }
 }
 

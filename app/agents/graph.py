@@ -111,14 +111,15 @@ def build_agent_graph(db: Session):
         if llm_suggestions:
             state["suggested_questions"] = llm_suggestions
             state["suggestion_status"] = "generated"
-            state["suggestion_reason"] = "llm_generated"
+            state["suggestion_reason"] = llm_reason or f"LLM이 추천 질문 {len(llm_suggestions)}개를 생성했습니다."
             return state
 
         fallback = _build_deterministic_suggested_questions(state)
         state["suggested_questions"] = fallback
         if fallback:
             state["suggestion_status"] = "fallback_generated"
-            state["suggestion_reason"] = llm_reason or llm_status
+            fallback_note = f"백엔드 fallback 추천 질문 {len(fallback)}개를 반환했습니다."
+            state["suggestion_reason"] = f"{llm_reason or llm_status} {fallback_note}"
         else:
             state["suggestion_status"] = llm_status
             state["suggestion_reason"] = llm_reason
@@ -281,20 +282,20 @@ async def _generate_llm_suggested_questions(state: AgentState) -> tuple[list[str
     )
     raw = await LLMClient().answer(system_prompt, user_prompt)
     if not raw:
-        return [], "llm_unavailable", "LLM 응답이 없어 백엔드 fallback 추천을 사용합니다."
+        return [], "llm_unavailable", "LLM 추천 호출 응답이 비어 있습니다. OPENAI_API_KEY가 서버에 없거나 LLM 호출이 실패했을 수 있습니다."
     try:
-        parsed = json.loads(raw)
+        parsed = _loads_llm_json(raw)
     except json.JSONDecodeError:
-        return [], "parse_error", "LLM 추천 질문 응답을 JSON으로 파싱하지 못했습니다."
+        return [], "parse_error", f"LLM 추천 질문 응답을 JSON 배열로 파싱하지 못했습니다. 응답 일부: {_preview_llm_output(raw)}"
     if not isinstance(parsed, list):
-        return [], "parse_error", "LLM 추천 질문 응답이 배열 형식이 아닙니다."
+        return [], "parse_error", f"LLM 추천 질문 응답이 배열 형식이 아닙니다. 실제 형식: {type(parsed).__name__}"
     raw_questions = [item for item in parsed if isinstance(item, str)]
     cleaned = _clean_suggested_questions(raw_questions)
     if cleaned:
-        return cleaned, "generated", "llm_generated"
+        return cleaned, "generated", f"LLM이 추천 질문 {len(cleaned)}개를 생성했습니다."
     if raw_questions:
-        return [], "filtered", "LLM 추천 질문이 필터링되어 백엔드 fallback 추천을 사용합니다."
-    return [], "empty_by_llm", "LLM이 빈 추천 질문 배열을 반환했습니다."
+        return [], "filtered", "LLM 추천 질문이 what-if 제외 규칙, 빈 문자열, 길이 제한, 중복 제거 과정에서 모두 필터링되었습니다."
+    return [], "empty_by_llm", "LLM이 빈 추천 질문 배열 또는 문자열이 아닌 항목만 반환했습니다."
 
 
 def _build_deterministic_answer(state: AgentState) -> str:
@@ -367,6 +368,25 @@ def _clean_suggested_questions(values: list[str]) -> list[str]:
             question = question[:80].rstrip()
         cleaned.append(question)
     return _dedupe(cleaned)[:3]
+
+
+def _loads_llm_json(raw: str):
+    text = raw.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    return json.loads(text)
+
+
+def _preview_llm_output(raw: str) -> str:
+    text = " ".join(raw.strip().split())
+    if len(text) > 120:
+        return f"{text[:120]}..."
+    return text or "(empty)"
 
 
 def _dedupe(values: list[str]) -> list[str]:

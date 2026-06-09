@@ -79,6 +79,9 @@ type ChatMessage = {
 };
 
 const testQuestions = [
+  "현재 분석 결과를 요약해줘",
+  "2개월 뒤 순자산과 순현금흐름을 알려줘",
+  "전기요금 카테고리 예측 근거와 적용 모델을 보여줘",
   "전기요금 예측을 위해 기상청 API를 호출해줘",
   "부동산 순자산 분석을 위해 부동산 통계 API를 호출해줘",
   "최근 금리와 경제 상황을 Tavily로 검색해서 내 분석과 연결해줘",
@@ -453,18 +456,24 @@ function App() {
                                     ))}
                                   </div>
                                 )}
-                                {message.suggestionStatus && (
-                                  <span className="suggestion-debug" title={message.suggestionReason ?? undefined}>
-                                    추천 {message.suggestionStatus}
-                                  </span>
-                                )}
-                                {message.toolPlanStatus && (
-                                  <span className="suggestion-debug" title={message.toolPlanReason ?? undefined}>
-                                    tool {message.toolPlanStatus}
-                                    {message.toolCalls && message.toolCalls.length > 0
-                                      ? `: ${message.toolCalls.join(", ")}`
-                                      : ""}
-                                  </span>
+                                {(message.suggestionStatus || message.toolPlanStatus) && (
+                                  <div className="debug-details">
+                                    {message.suggestionStatus && (
+                                      <span title={message.suggestionReason ?? undefined}>
+                                        추천 {formatDebugStatus(message.suggestionStatus)}
+                                        {message.suggestionReason ? `: ${message.suggestionReason}` : ""}
+                                      </span>
+                                    )}
+                                    {message.toolPlanStatus && (
+                                      <span title={message.toolPlanReason ?? undefined}>
+                                        tool {formatDebugStatus(message.toolPlanStatus)}
+                                        {message.toolCalls && message.toolCalls.length > 0
+                                          ? `: ${message.toolCalls.join(", ")}`
+                                          : ""}
+                                        {message.toolPlanReason ? ` (${message.toolPlanReason})` : ""}
+                                      </span>
+                                    )}
+                                  </div>
                                 )}
                               </div>
                             ))}
@@ -559,6 +568,23 @@ function EmptyState({ title, description }: { title: string; description: string
 
 function formatCurrency(value: number) {
   return `${Math.round(value).toLocaleString("ko-KR")}원`;
+}
+
+function formatDebugStatus(status: string) {
+  const labels: Record<string, string> = {
+    generated: "LLM 생성",
+    fallback_generated: "fallback 생성",
+    llm_generated: "LLM 생성",
+    llm_planned: "LLM 계획",
+    llm_unavailable: "LLM 응답 없음",
+    parse_error: "파싱 실패",
+    invalid_tool: "허용되지 않은 tool",
+    empty_by_llm: "LLM 0개 반환",
+    filtered: "필터링됨",
+    no_analysis: "분석 없음",
+    none: "없음",
+  };
+  return labels[status] ?? status;
 }
 
 function buildInitialSuggestedQuestions(analysis: AnalysisResponse | null) {
