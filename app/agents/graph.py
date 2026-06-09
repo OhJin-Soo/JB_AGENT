@@ -270,7 +270,10 @@ async def _generate_llm_suggested_questions(state: AgentState) -> tuple[list[str
     recent_turns = "\n".join(f"{item.role}: {item.content}" for item in state["conversation"][-6:])
     system_prompt = (
         "You suggest Korean follow-up questions for a financial analysis chat. Always return "
-        "only a JSON array with up to 3 short strings. Do not include what-if simulation questions."
+        "only a JSON array with up to 3 short strings. Each string must be a concrete question "
+        "the user can send to analyze the current financial result. Do not include what-if "
+        "simulation questions. Do not ask whether the user has additional questions, needs more "
+        "help, or wants more explanation."
     )
     user_prompt = (
         f"Current question: {state['question']}\n"
@@ -294,7 +297,7 @@ async def _generate_llm_suggested_questions(state: AgentState) -> tuple[list[str
     if cleaned:
         return cleaned, "generated", f"LLM이 추천 질문 {len(cleaned)}개를 생성했습니다."
     if raw_questions:
-        return [], "filtered", "LLM 추천 질문이 what-if 제외 규칙, 빈 문자열, 길이 제한, 중복 제거 과정에서 모두 필터링되었습니다."
+        return [], "filtered", "LLM 추천 질문이 what-if 제외, 메타 질문 제외, 빈 문자열, 길이 제한, 중복 제거 과정에서 모두 필터링되었습니다."
     return [], "empty_by_llm", "LLM이 빈 추천 질문 배열 또는 문자열이 아닌 항목만 반환했습니다."
 
 
@@ -364,10 +367,32 @@ def _clean_suggested_questions(values: list[str]) -> list[str]:
         question = value.strip().strip('"').strip("'")
         if not question or any(keyword in question.lower() for keyword in blocked_keywords):
             continue
+        if _is_meta_suggestion(question):
+            continue
         if len(question) > 80:
             question = question[:80].rstrip()
         cleaned.append(question)
     return _dedupe(cleaned)[:3]
+
+
+def _is_meta_suggestion(question: str) -> bool:
+    normalized = "".join(question.lower().split())
+    blocked_fragments = (
+        "추가적인질문",
+        "추가질문",
+        "질문이있",
+        "질문있",
+        "궁금한점",
+        "궁금하신점",
+        "더알고싶",
+        "더궁금",
+        "도움이필요",
+        "더도와",
+        "설명이필요",
+        "더설명",
+        "문의하",
+    )
+    return any(fragment in normalized for fragment in blocked_fragments)
 
 
 def _loads_llm_json(raw: str):

@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from app.agents.graph import _clean_suggested_questions
 from app.core.database import Base, engine
 from app.main import app
 
@@ -76,6 +77,19 @@ def test_create_get_history_and_chat() -> None:
     assert any("kma_sfcdd3.php" in item for item in weather_data["evidence"])
     assert any("tm1, tm2, stn, help, authKey" in item for item in weather_data["evidence"])
     assert not any("nx" in item or "base_date" in item for item in weather_data["evidence"])
+
+
+def test_suggested_question_guardrail_filters_meta_questions() -> None:
+    cleaned = _clean_suggested_questions(
+        [
+            "이 분석 결과에 대한 추가적인 질문이 있나요?",
+            "궁금한 점이 더 있나요?",
+            "월별 순현금흐름을 알려줘",
+            "전기요금 카테고리 근거를 보여줘",
+        ]
+    )
+
+    assert cleaned == ["월별 순현금흐름을 알려줘", "전기요금 카테고리 근거를 보여줘"]
 
 
 def build_sample_cashflows() -> list[dict]:
