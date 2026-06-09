@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import {
   BarChart3,
   Bot,
+  FileDown,
   Download,
   History,
   Loader2,
@@ -10,6 +11,7 @@ import {
   Send,
   Sparkles,
   Trash2,
+  Upload,
   Wallet,
 } from "lucide-react";
 import {
@@ -25,7 +27,7 @@ import {
   YAxis,
 } from "recharts";
 import "./styles.css";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
 
@@ -43,6 +45,12 @@ type AssetDraft = {
   type: "cash" | "pension" | "real_estate" | "other";
   name: string;
   current_value: string;
+};
+
+type CsvUploadResult = {
+  title: string;
+  cashflows: CashflowDraft[];
+  assets: AssetDraft[];
 };
 
 type ForecastPoint = {
@@ -131,6 +139,7 @@ function App() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
   const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([]);
+  const csvInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     void loadHistory();
@@ -244,6 +253,18 @@ function App() {
     setAssets((items) => items.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item)));
   }
 
+  async function handleCsvUpload(file: File) {
+    const parsed = await parseCsvUpload(file);
+    setCashflows(parsed.cashflows);
+    if (parsed.assets.length > 0) {
+      setAssets(parsed.assets);
+    }
+    if (!title.trim() || title === "30개월 현금흐름 분석") {
+      setTitle(parsed.title);
+    }
+    setError("");
+  }
+
   const visibleSuggestedQuestions =
     chatMessages.length === 0 ? buildInitialSuggestedQuestions(analysis) : suggestedQuestions;
 
@@ -275,6 +296,42 @@ function App() {
                 onChange={(event) => setForecastMonths(Number(event.target.value))}
               />
             </label>
+
+            <div className="csv-upload-panel">
+              <div className="section-title">
+                <span>CSV 업로드</span>
+                <a className="sample-link" href="/sample_cashflow_upload.csv" download>
+                  <FileDown size={15} />
+                  샘플 CSV
+                </a>
+              </div>
+              <p className="upload-hint">현금흐름과 자산을 CSV로 불러와 입력 테이블을 채울 수 있습니다.</p>
+              <input
+                ref={csvInputRef}
+                type="file"
+                accept=".csv,text/csv"
+                onChange={async (event) => {
+                  const file = event.target.files?.[0];
+                  if (!file) return;
+                  try {
+                    await handleCsvUpload(file);
+                  } catch (caught) {
+                    setError(caught instanceof Error ? caught.message : "CSV를 읽을 수 없습니다.");
+                  } finally {
+                    event.target.value = "";
+                  }
+                }}
+                hidden
+              />
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => csvInputRef.current?.click()}
+              >
+                <Upload size={16} />
+                CSV 불러오기
+              </button>
+            </div>
 
             <div className="section-title">
               <span>현금흐름</span>
@@ -603,6 +660,176 @@ function electricitySampleAmount(month: number, index: number) {
   if (seasonalPeak) return 260000 + (index % 3) * 18000;
   if (shoulderSeason) return 190000 + (index % 2) * 12000;
   return 125000 + (index % 2) * 9000;
+}
+
+function parseCsvUpload(file: File): Promise<CsvUploadResult> {
+  return file.text().then((text) => {
+    const rows = parseCsvRows(text);
+    if (rows.length === 0) {
+      throw new Error("CSV에 데이터가 없습니다.");
+    }
+
+    const headers = rows[0].map((value) => normalizeHeader(value));
+    const cashflows: CashflowDraft[] = [];
+    const assets: AssetDraft[] = [];
+
+    for (const row of rows.slice(1)) {
+      if (row.every((value) => value.trim() === "")) continue;
+      const record = buildRecord(headers, row);
+      if (isAssetRecord(record)) {
+        const asset = parseAssetRecord(record);
+        if (asset) assets.push(asset);
+        continue;
+      }
+      const cashflow = parseCashflowRecord(record);
+      if (cashflow) cashflows.push(cashflow);
+    }
+
+    if (cashflows.length === 0) {
+      throw new Error("CSV에서 현금흐름 행을 찾지 못했습니다.");
+    }
+
+    return {
+      title: file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim() || "CSV 업로드 분석",
+      cashflows,
+      assets,
+    };
+  });
+}
+
+function parseCsvRows(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const nextChar = text[index + 1];
+
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        cell += '"';
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (char === "," && !inQuotes) {
+      row.push(cell);
+      cell = "";
+      continue;
+    }
+
+    if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && nextChar === "\n") {
+        index += 1;
+      }
+      row.push(cell);
+      if (row.some((value) => value.trim() !== "")) {
+        rows.push(row);
+      }
+      row = [];
+      cell = "";
+      continue;
+    }
+
+    cell += char;
+  }
+
+  if (cell.length > 0 || row.length > 0) {
+    row.push(cell);
+    if (row.some((value) => value.trim() !== "")) {
+      rows.push(row);
+    }
+  }
+
+  return rows;
+}
+
+function buildRecord(headers: string[], row: string[]) {
+  const record: Record<string, string> = {};
+  headers.forEach((header, index) => {
+    if (!header) return;
+    record[header] = (row[index] ?? "").trim();
+  });
+  return record;
+}
+
+function normalizeHeader(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, "_");
+}
+
+function isAssetRecord(record: Record<string, string>) {
+  const recordType = normalizeRecordType(record.record_type ?? record.type ?? "");
+  return (
+    recordType === "asset" ||
+    Boolean(record.asset_type || record.asset_name || record.asset_value || record.current_value || record.region_code)
+  );
+}
+
+function parseCashflowRecord(record: Record<string, string>): CashflowDraft | null {
+  const dateValue = record.date || record.날짜 || "";
+  const typeValue = normalizeCashflowType(record.type || record.수입지출 || "");
+  const categoryValue = record.category || record.카테고리 || "";
+  const amountValue = parseAmount(record.amount || record.금액 || "");
+  if (!dateValue || !typeValue || !categoryValue || amountValue === null) {
+    return null;
+  }
+
+  return {
+    date: dateValue,
+    type: typeValue,
+    category: categoryValue,
+    amount: String(amountValue),
+    description: record.description || record.설명 || "",
+  };
+}
+
+function parseAssetRecord(record: Record<string, string>): AssetDraft | null {
+  const assetType = normalizeAssetType(record.asset_type || record.자산유형 || record.type || "");
+  const name = record.asset_name || record.name || record.자산명 || "";
+  const value = parseAmount(record.asset_value || record.current_value || record.가치 || record.amount || "");
+  if (!assetType || !name || value === null) {
+    return null;
+  }
+
+  return {
+    type: assetType,
+    name,
+    current_value: String(value),
+  };
+}
+
+function normalizeRecordType(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (["asset", "자산"].includes(normalized)) return "asset";
+  if (["cashflow", "flow", "현금흐름", "거래"].includes(normalized)) return "cashflow";
+  return normalized;
+}
+
+function normalizeCashflowType(value: string): CashflowType | "" {
+  const normalized = value.trim().toLowerCase();
+  if (["income", "inflow", "수입"].includes(normalized)) return "income";
+  if (["expense", "outflow", "지출"].includes(normalized)) return "expense";
+  return "";
+}
+
+function normalizeAssetType(value: string): AssetDraft["type"] | "" {
+  const normalized = value.trim().toLowerCase();
+  if (["cash", "현금", "예금", "저축"].includes(normalized)) return "cash";
+  if (["pension", "연금"].includes(normalized)) return "pension";
+  if (["real_estate", "부동산", "아파트", "주택"].includes(normalized)) return "real_estate";
+  if (["other", "기타"].includes(normalized)) return "other";
+  return "";
+}
+
+function parseAmount(value: string) {
+  const numeric = Number(value.replace(/,/g, "").trim());
+  if (!Number.isFinite(numeric) || numeric < 0) return null;
+  return numeric;
 }
 
 createRoot(document.getElementById("root")!).render(
