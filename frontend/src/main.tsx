@@ -86,15 +86,6 @@ type ChatMessage = {
   toolCalls?: string[];
 };
 
-const testQuestions = [
-  "현재 분석 결과를 요약해줘",
-  "2개월 뒤 순자산과 순현금흐름을 알려줘",
-  "전기요금 카테고리 예측 근거와 적용 모델을 보여줘",
-  "전기요금 예측을 위해 기상청 API를 호출해줘",
-  "부동산 순자산 분석을 위해 부동산 통계 API를 호출해줘",
-  "최근 금리와 경제 상황을 Tavily로 검색해서 내 분석과 연결해줘",
-];
-
 const defaultCashflows: CashflowDraft[] = [
   ...Array.from({ length: 30 }, (_, index) => {
     const year = index < 12 ? 2024 : index < 24 ? 2025 : 2026;
@@ -535,13 +526,6 @@ function App() {
                               </div>
                             ))}
                             {chatLoading && <div className="message assistant">답변 생성 중...</div>}
-                          </div>
-                          <div className="test-question-buttons">
-                            {testQuestions.map((item) => (
-                              <button type="button" key={item} disabled={chatLoading} onClick={() => void sendChatMessage(item)}>
-                                {item}
-                              </button>
-                            ))}
                           </div>
                           {visibleSuggestedQuestions.length > 0 && (
                             <div className="question-suggestions">

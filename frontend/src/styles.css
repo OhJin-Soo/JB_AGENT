@@ -592,33 +592,6 @@ select:focus {
   line-height: 1.35;
 }
 
-.test-question-buttons {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
-  padding: 10px 12px;
-  border-top: 1px solid #e6ecf5;
-  background: #fbfcfe;
-}
-
-.test-question-buttons button {
-  min-height: 32px;
-  border: 1px dashed #aebccc;
-  border-radius: 6px;
-  padding: 7px 9px;
-  color: #40516b;
-  background: #ffffff;
-  font-size: 12px;
-  font-weight: 700;
-  text-align: left;
-}
-
-.test-question-buttons button:hover:not(:disabled) {
-  border-color: #2563eb;
-  color: #1d4ed8;
-  background: #eff6ff;
-}
-
 .question-suggestions {
   display: grid;
   gap: 7px;
