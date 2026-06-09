@@ -86,40 +86,11 @@ type ChatMessage = {
   toolCalls?: string[];
 };
 
-const defaultCashflows: CashflowDraft[] = [
-  ...Array.from({ length: 30 }, (_, index) => {
-    const year = index < 12 ? 2024 : index < 24 ? 2025 : 2026;
-    const monthNumber = (index % 12) + 1;
-    const month = `${monthNumber}`.padStart(2, "0");
-    return [
-      { date: `${year}-${month}-01`, amount: "3000000", type: "income" as const, category: "월급", description: "" },
-      { date: `${year}-${month}-10`, amount: "650000", type: "income" as const, category: "연금", description: "" },
-      {
-        date: `${year}-${month}-05`,
-        amount: `${950000 + index * 15000}`,
-        type: "expense" as const,
-        category: "생활비",
-        description: "",
-      },
-      {
-        date: `${year}-${month}-18`,
-        amount: `${electricitySampleAmount(monthNumber, index)}`,
-        type: "expense" as const,
-        category: "전기요금",
-        description: "계절성 공과금",
-      },
-    ];
-  }).flat(),
-];
-
 function App() {
-  const [title, setTitle] = useState("30개월 현금흐름 분석");
+  const [title, setTitle] = useState("현금흐름 분석");
   const [forecastMonths, setForecastMonths] = useState(6);
-  const [cashflows, setCashflows] = useState<CashflowDraft[]>(defaultCashflows);
-  const [assets, setAssets] = useState<AssetDraft[]>([
-    { type: "cash", name: "예금", current_value: "12000000" },
-    { type: "real_estate", name: "아파트", current_value: "420000000" },
-  ]);
+  const [cashflows, setCashflows] = useState<CashflowDraft[]>([]);
+  const [assets, setAssets] = useState<AssetDraft[]>([]);
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
   const [history, setHistory] = useState<AnalysisResponse[]>([]);
   const [activeTab, setActiveTab] = useState<"analysis" | "history">("analysis");
@@ -149,6 +120,10 @@ function App() {
 
   async function submitAnalysis(event: FormEvent) {
     event.preventDefault();
+    if (cashflows.length === 0) {
+      setError("CSV를 업로드하거나 현금흐름을 직접 추가하세요.");
+      return;
+    }
     setLoading(true);
     setError("");
     try {
@@ -250,7 +225,7 @@ function App() {
     if (parsed.assets.length > 0) {
       setAssets(parsed.assets);
     }
-    if (!title.trim() || title === "30개월 현금흐름 분석") {
+    if (!title.trim() || title === "현금흐름 분석") {
       setTitle(parsed.title);
     }
     setError("");
@@ -636,14 +611,6 @@ function buildInitialSuggestedQuestions(analysis: AnalysisResponse | null) {
     "카테고리별 지출을 보여줘",
     `${forecastMonths}개월 뒤 순자산은 얼마야?`,
   ];
-}
-
-function electricitySampleAmount(month: number, index: number) {
-  const seasonalPeak = [1, 2, 7, 8, 12].includes(month);
-  const shoulderSeason = [6, 9].includes(month);
-  if (seasonalPeak) return 260000 + (index % 3) * 18000;
-  if (shoulderSeason) return 190000 + (index % 2) * 12000;
-  return 125000 + (index % 2) * 9000;
 }
 
 function parseCsvUpload(file: File): Promise<CsvUploadResult> {
