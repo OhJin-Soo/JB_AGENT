@@ -36,10 +36,10 @@ def classify_question(question: str) -> str:
     normalized = question.lower()
     if any(keyword in normalized for keyword in ["날씨", "기온", "습도", "전기", "난방", "냉방"]):
         return AgentIntent.EXTERNAL_WEATHER
-    if any(keyword in normalized for keyword in ["몇월", "월별", "언제", "6개월", "개월", "뒤", "예측"]):
-        return AgentIntent.MONTHLY_FORECAST
     if any(keyword in normalized for keyword in ["부동산", "지가", "집값"]):
         return AgentIntent.EXTERNAL_REAL_ESTATE
+    if any(keyword in normalized for keyword in ["몇월", "월별", "언제", "6개월", "개월", "뒤", "예측"]):
+        return AgentIntent.MONTHLY_FORECAST
     if any(keyword in normalized for keyword in ["뉴스", "최신", "금리", "경제", "시장"]):
         return AgentIntent.EXTERNAL_SEARCH
     if any(keyword in normalized for keyword in ["카테고리", "지출", "소비", "생활비", "월급", "급여", "수입"]):
@@ -229,7 +229,7 @@ async def fetch_weather_context() -> ToolResult:
     )
 
 
-async def fetch_real_estate_context() -> ToolResult:
+async def fetch_real_estate_context(analysis: AnalysisResponse | None = None, question: str = "") -> ToolResult:
     today = date.today()
     start_date = date(today.year - 5, today.month, 1)
     try:
@@ -240,10 +240,28 @@ async def fetch_real_estate_context() -> ToolResult:
             missing_data=["부동산 통계 API 조회 결과"],
             content=f"부동산 데이터를 조회하지 못했습니다: {exc}",
         )
+    parsed = _parse_real_estate_change_rates(data)
+    projection = _build_real_estate_projection(analysis, question, parsed)
+    evidence = [
+        "부동산 통계 최근 5년 지가변동률 조회를 수행했습니다.",
+        f"조회 기간: {start_date:%Y%m}~{today:%Y%m}, CLS_ID=500025",
+    ]
+    if parsed["count"]:
+        evidence.extend(
+            [
+                f"지가변동률 파싱 건수: {parsed['count']}건",
+                f"최근 지가변동률: {parsed['latest_label']} {parsed['latest_rate']:.4f}%",
+                f"최근 12개월 평균 월 지가변동률: {parsed['average_monthly_rate']:.4f}%",
+            ]
+        )
+    else:
+        evidence.append("부동산 API 응답에서 DTA_VAL 지가변동률을 파싱하지 못했습니다.")
+    evidence.extend(projection["evidence"])
     return ToolResult(
         name="fetch_real_estate_context",
-        content=str(data)[:2000],
-        evidence=["부동산 통계 최근 5년 지가변동률 조회를 수행했습니다."],
+        content=projection["content"] or f"부동산 통계 API 응답 일부:\n{str(data)[:2000]}",
+        evidence=evidence,
+        missing_data=projection["missing_data"],
     )
 
 
@@ -282,6 +300,106 @@ def _find_target_month(question: str, points):
         if f"{number}개월" in question or f"{number}달" in question:
             return points[number - 1]
     return None
+
+
+def _parse_real_estate_change_rates(data: dict) -> dict:
+    rows = list(_iter_dicts(data))
+    rates: list[tuple[str, float]] = []
+    for row in rows:
+        if "DTA_VAL" not in row:
+            continue
+        rate = _parse_float(row.get("DTA_VAL"))
+        if rate is None:
+            continue
+        label = str(row.get("WRTTIME_DESC") or row.get("WRTTIME_IDTFR_ID") or row.get("WRTTIME") or "최근")
+        rates.append((label, rate))
+    recent_rates = rates[-12:] if len(rates) >= 12 else rates
+    average = sum(rate for _, rate in recent_rates) / len(recent_rates) if recent_rates else 0.0
+    latest_label, latest_rate = rates[-1] if rates else ("없음", 0.0)
+    return {
+        "count": len(rates),
+        "average_monthly_rate": average,
+        "latest_label": latest_label,
+        "latest_rate": latest_rate,
+    }
+
+
+def _build_real_estate_projection(
+    analysis: AnalysisResponse | None,
+    question: str,
+    parsed: dict,
+) -> dict:
+    missing_data: list[str] = []
+    evidence: list[str] = []
+    if analysis is None:
+        return {
+            "content": "",
+            "evidence": [],
+            "missing_data": ["분석 결과 ID"],
+        }
+    real_estate_value = _parse_float(analysis.result.data_quality.get("real_estate_initial_value"))
+    if not real_estate_value:
+        return {
+            "content": "분석 결과에 부동산 자산 기준값이 없어 API 기반 자산 가치 보정 계산을 수행하지 못했습니다.",
+            "evidence": [],
+            "missing_data": ["부동산 자산 기준값"],
+        }
+    if not parsed["count"]:
+        return {
+            "content": "부동산 API 응답에서 지가변동률을 파싱하지 못해 자산 가치 보정 계산을 수행하지 못했습니다.",
+            "evidence": [],
+            "missing_data": ["부동산 통계 지가변동률"],
+        }
+    points = analysis.result.forecast
+    target = _find_target_month(question, points) or points[-1]
+    horizon = points.index(target) + 1
+    api_monthly_growth = parsed["average_monthly_rate"] / 100
+    proxy_monthly_growth = _parse_float(analysis.result.data_quality.get("real_estate_monthly_growth_proxy")) or 0.0
+    api_real_estate_value = real_estate_value * ((1 + api_monthly_growth) ** horizon)
+    proxy_real_estate_value = real_estate_value * ((1 + proxy_monthly_growth) ** horizon)
+    adjusted_net_worth = target.net_worth - proxy_real_estate_value + api_real_estate_value
+    api_change = api_real_estate_value - real_estate_value
+    adjusted_delta = adjusted_net_worth - target.net_worth
+    evidence.extend(
+        [
+            f"입력 부동산 자산 기준값: {real_estate_value:,.0f}원",
+            f"{horizon}개월 후 API 기반 부동산 예상 가치: {api_real_estate_value:,.0f}원",
+            f"{horizon}개월 후 API 기반 부동산 가치 변동분: {api_change:,.0f}원",
+            f"{target.month} 기존 순자산 예측값: {target.net_worth:,.0f}원",
+            f"{target.month} 부동산 API 보정 순자산: {adjusted_net_worth:,.0f}원",
+            f"기존 프록시 대비 순자산 보정분: {adjusted_delta:,.0f}원",
+        ]
+    )
+    content = (
+        f"부동산 API의 최근 12개월 평균 월 지가변동률 {parsed['average_monthly_rate']:.4f}%를 적용하면 "
+        f"{horizon}개월 후 부동산 자산은 {api_real_estate_value:,.0f}원으로 추정됩니다. "
+        f"이를 반영한 {target.month} 보정 순자산은 {adjusted_net_worth:,.0f}원입니다."
+    )
+    return {"content": content, "evidence": evidence, "missing_data": missing_data}
+
+
+def _iter_dicts(value):
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from _iter_dicts(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _iter_dicts(child)
+
+
+def _parse_float(value) -> float | None:
+    if isinstance(value, int | float):
+        return float(value)
+    if value is None:
+        return None
+    text = str(value).replace(",", "").replace("%", "").strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
 
 
 def _redact_auth_key(url: str) -> str:

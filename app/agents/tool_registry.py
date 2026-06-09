@@ -49,8 +49,8 @@ TOOL_SPECS: dict[str, ToolSpec] = {
     ),
     "fetch_real_estate_context": ToolSpec(
         name="fetch_real_estate_context",
-        description="부동산 통계 API로 최근 5년 지가변동률 데이터를 조회한다.",
-        requires_analysis=False,
+        description="부동산 통계 API로 최근 5년 지가변동률을 조회하고 분석의 부동산 자산 가치에 반영한다.",
+        requires_analysis=True,
         arguments=[],
     ),
     "search_web_context": ToolSpec(
@@ -91,7 +91,7 @@ async def execute_tool_call(
     if name == "fetch_weather_context":
         return await fetch_weather_context()
     if name == "fetch_real_estate_context":
-        return await fetch_real_estate_context()
+        return await fetch_real_estate_context(analysis, question)
     if name == "search_web_context":
         return await search_web_context(question)
     return ToolResult(name=name, missing_data=[f"등록되었지만 실행 핸들러가 없는 tool: {name}"])
@@ -101,7 +101,7 @@ def fallback_tool_names_for_intent(intent: str) -> list[str]:
     if intent == AgentIntent.EXTERNAL_WEATHER:
         return ["fetch_weather_context", "get_analysis_summary"]
     if intent == AgentIntent.EXTERNAL_REAL_ESTATE:
-        return ["fetch_real_estate_context", "get_analysis_summary"]
+        return ["fetch_real_estate_context", "get_monthly_forecast"]
     if intent == AgentIntent.EXTERNAL_SEARCH:
         return ["search_web_context", "get_analysis_summary"]
     if intent == AgentIntent.MONTHLY_FORECAST:

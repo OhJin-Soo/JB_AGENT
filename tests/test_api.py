@@ -1,8 +1,10 @@
 from fastapi.testclient import TestClient
 
 from app.agents.graph import _build_korean_tool_plan_reason, _clean_suggested_questions
+from app.agents.tools import AgentIntent, _build_real_estate_projection, _parse_real_estate_change_rates, classify_question
 from app.core.database import Base, engine
 from app.main import app
+from app.schemas.analysis import AnalysisResponse
 
 
 def setup_function() -> None:
@@ -98,6 +100,60 @@ def test_tool_plan_reason_is_korean_and_deterministic() -> None:
     )
 
     assert reason == "저장된 분석 결과 요약을 조회하기 위해, 카테고리별 예측과 적용 모델을 조회하기 위해"
+
+
+def test_real_estate_question_uses_real_estate_intent_before_monthly_forecast() -> None:
+    assert classify_question("내 부동산 자산이 6개월 후에 어떻게 변동될지 알려줘") == AgentIntent.EXTERNAL_REAL_ESTATE
+
+
+def test_real_estate_api_projection_adjusts_asset_value() -> None:
+    analysis = AnalysisResponse.model_validate(
+        {
+            "id": 1,
+            "title": "real estate",
+            "created_at": "2026-06-09T00:00:00",
+            "result": {
+                "forecast": [
+                    {
+                        "month": f"2026-{month:02d}",
+                        "income": 3650000,
+                        "expense": 1300000,
+                        "net_cashflow": 2350000,
+                        "cumulative_cashflow": 2350000 * month,
+                        "net_worth": 420000000 * ((1 + 0.0015) ** month) + 2350000 * month,
+                    }
+                    for month in range(1, 7)
+                ],
+                "categories": [],
+                "summary": "summary",
+                "chart": {"labels": [], "income": [], "expense": [], "net_worth": []},
+                "data_quality": {
+                    "observed_months": 24,
+                    "forecast_months": 6,
+                    "real_estate_initial_value": 420000000,
+                    "real_estate_monthly_growth_proxy": 0.0015,
+                },
+            },
+        }
+    )
+    parsed = _parse_real_estate_change_rates(
+        {
+            "SttsApiTblData": [
+                {
+                    "row": [
+                        {"WRTTIME_IDTFR_ID": "202501", "DTA_VAL": "0.20"},
+                        {"WRTTIME_IDTFR_ID": "202502", "DTA_VAL": "0.30"},
+                    ]
+                }
+            ]
+        }
+    )
+    projection = _build_real_estate_projection(analysis, "6개월 후 부동산은?", parsed)
+
+    assert parsed["average_monthly_rate"] == 0.25
+    assert projection["missing_data"] == []
+    assert any("6개월 후 API 기반 부동산 예상 가치" in item for item in projection["evidence"])
+    assert "보정 순자산" in projection["content"]
 
 
 def build_sample_cashflows() -> list[dict]:

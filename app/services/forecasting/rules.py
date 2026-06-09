@@ -109,6 +109,8 @@ def run_rule_based_forecast(request: AnalysisRequest) -> AnalysisResult:
         data_quality={
             "observed_months": len(observed_months),
             "forecast_months": request.forecast_months,
+            "real_estate_initial_value": round(real_estate_value, 2),
+            "real_estate_monthly_growth_proxy": real_estate_monthly_growth,
             "method": "model_selected_forecast_with_external_features",
             "model_counts": ", ".join(f"{model}:{count}" for model, count in sorted(model_counts.items())),
             "external_features": (
