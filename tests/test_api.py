@@ -233,6 +233,47 @@ def test_electricity_category_question_only_returns_requested_month_without_mode
     assert not result.missing_data
 
 
+def test_electricity_reason_question_includes_basis_and_model_as_secondary_info() -> None:
+    analysis = AnalysisResponse.model_validate(
+        {
+            "id": 1,
+            "title": "electricity",
+            "created_at": "2026-06-09T00:00:00",
+            "result": {
+                "forecast": [
+                    {
+                        "month": "2026-07",
+                        "income": 3650000,
+                        "expense": 1300000,
+                        "net_cashflow": 2350000,
+                        "cumulative_cashflow": 2350000,
+                        "net_worth": 440000000,
+                    }
+                ],
+                "categories": [
+                    {
+                        "category": "전기요금",
+                        "type": "expense",
+                        "model": "sarimax",
+                        "monthly_amount": 187333,
+                        "observed": {},
+                        "forecast": {"2026-07": 260000},
+                    }
+                ],
+                "summary": "summary",
+                "chart": {"labels": [], "income": [], "expense": [], "net_worth": []},
+                "data_quality": {"observed_months": 30, "forecast_months": 6},
+            },
+        }
+    )
+
+    result = get_category_forecast(analysis, "전기요금이 260,000원으로 예측된 이유는 무엇인가요?")
+
+    assert result.evidence == [
+        "전기요금 월평균 187,333원, 최근 30개월 기록의 월별 계절성과 최근 변동 추세를 반영, 사용 모델 SARIMAX"
+    ]
+
+
 def test_real_estate_answer_does_not_append_duplicate_basis_label() -> None:
     answer = _build_deterministic_answer(
         {
@@ -301,6 +342,27 @@ def test_electricity_answer_sanitizer_blocks_model_and_unrelated_cashflow_when_n
     assert _sanitize_llm_answer(state, "2026년 1월 전기요금은 260,000원이고 순현금흐름은 2,000,000원입니다.") == (
         "전기요금 2026-01 입력 데이터 기준 260,000원."
     )
+
+
+def test_electricity_reason_answer_sanitizer_allows_model_and_removes_speculative_phrase() -> None:
+    state = {
+        "intent": AgentIntent.EXTERNAL_WEATHER,
+        "question": "전기요금이 260,000원으로 예측된 이유는 무엇인가요?",
+        "tool_results": [type("Result", (), {"content": "전기요금 카테고리는 저장된 분석 기준 값을 기준으로 답변합니다."})()],
+        "evidence": [
+            "전기요금 월평균 187,333원, 최근 30개월 기록의 월별 계절성과 최근 변동 추세를 반영, 사용 모델 SARIMAX"
+        ],
+        "missing_data": [],
+        "confidence": "high",
+    }
+
+    answer = _sanitize_llm_answer(
+        state,
+        "최근 30개월 기록을 반영해 260,000원으로 예측된 것으로 보입니다. SARIMAX가 사용되었습니다.",
+    )
+
+    assert "보입니다" not in answer
+    assert "SARIMAX" in answer
 
 
 def build_sample_cashflows() -> list[dict]:

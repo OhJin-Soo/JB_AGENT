@@ -111,8 +111,10 @@ def get_category_forecast(analysis: AnalysisResponse | None, question: str) -> T
         selected = categories
     available_months = _category_available_months(selected)
     target_month = _find_target_month_key(question, available_months)
+    include_model = _asks_model_or_basis(question)
+    observed_month_count = int(analysis.result.data_quality.get("observed_months", 0))
     evidence = [
-        _format_category_forecast_evidence(item, target_month, _asks_model_or_basis(question))
+        _format_category_forecast_evidence(item, target_month, include_model, observed_month_count)
         for item in selected[:8]
     ]
     missing_data: list[str] = []
@@ -349,21 +351,41 @@ def _category_available_months(categories) -> list[str]:
 
 def _asks_model_or_basis(question: str) -> bool:
     normalized = question.lower()
-    return any(keyword in normalized for keyword in ["모델", "근거", "sarimax", "xgboost", "왜", "어떻게 계산"])
+    return any(keyword in normalized for keyword in ["모델", "근거", "이유", "sarimax", "xgboost", "왜", "어떻게 계산"])
 
 
-def _format_category_forecast_evidence(item, target_month: str | None, include_model: bool) -> str:
+def _format_category_forecast_evidence(
+    item,
+    target_month: str | None,
+    include_model: bool,
+    observed_month_count: int,
+) -> str:
     if target_month:
         observed_amount = item.observed.get(target_month)
         if observed_amount is not None:
             text = f"{item.category} {target_month} 입력 데이터 기준 {observed_amount:,.0f}원"
-            return f"{text}, 적용 모델 {item.model}" if include_model else text
+            return _append_model_basis(text, item, observed_month_count) if include_model else text
         forecast_amount = item.forecast.get(target_month)
         if forecast_amount is not None:
             text = f"{item.category} {target_month} 예측 {forecast_amount:,.0f}원"
-            return f"{text}, 적용 모델 {item.model}" if include_model else text
+            return _append_model_basis(text, item, observed_month_count) if include_model else text
     text = f"{item.category} 월평균 {item.monthly_amount:,.0f}원"
-    return f"{text}, 적용 모델 {item.model}" if include_model else text
+    return _append_model_basis(text, item, observed_month_count) if include_model else text
+
+
+def _append_model_basis(text: str, item, observed_month_count: int) -> str:
+    model_label = item.model.upper() if item.model in {"sarimax", "xgboost"} else item.model
+    if item.model == "sarimax":
+        return (
+            f"{text}, 최근 {observed_month_count}개월 기록의 월별 계절성과 최근 변동 추세를 반영, "
+            f"사용 모델 {model_label}"
+        )
+    if item.model == "xgboost":
+        return (
+            f"{text}, 최근 {observed_month_count}개월 기록의 지연값과 외생변수 특성을 반영, "
+            f"사용 모델 {model_label}"
+        )
+    return f"{text}, 최근 {observed_month_count}개월 기록의 반복 금액 패턴을 반영, 사용 모델 {model_label}"
 
 
 def _parse_real_estate_change_rates(data: dict) -> dict:

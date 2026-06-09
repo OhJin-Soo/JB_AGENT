@@ -210,7 +210,8 @@ async def _generate_llm_answer(state: AgentState) -> str:
         "the calculation basis inside the paragraph. Do not append a separate '근거:' section. "
         "For electricity bill forecast questions, prioritize get_category_forecast results and "
         "state the category model such as SARIMAX or XGBoost. Do not replace the user's analysis "
-        "forecast with generic web-search electricity price information."
+        "forecast with generic web-search electricity price information. Do not use speculative "
+        "phrases such as '보입니다', '추정됩니다' when the tool result already provides a concrete value."
     )
     answer_constraints = _answer_constraints_for_intent(state["intent"], state["question"])
     user_prompt = (
@@ -236,6 +237,8 @@ def _answer_constraints_for_intent(intent: str, question: str) -> str:
             "- 전기요금 카테고리의 저장된 모델 예측값을 우선 사용합니다.\n"
             f"{model_rule}\n"
             "- 월별 전체 수입, 전체 지출, 순현금흐름, 순자산은 언급하지 않습니다.\n"
+            "- '보입니다', '추정됩니다' 같은 추측성 표현을 쓰지 않습니다.\n"
+            "- 이유를 묻는 질문에는 최근 관측 기록의 계절성/변동 추세를 반영했다는 점을 먼저 말하고, 모델명은 부가정보로 뒤에 짧게 언급합니다.\n"
             "- 기상청 결과는 외생변수 맥락으로만 설명하고, Tavily나 일반 기사 수치로 사용자의 전기요금 예측값을 대체하지 않습니다.\n"
             "- 요청 월이 예측 범위 밖이면 현재 예측 범위를 말하고 추가 예측 기간이 필요하다고 답합니다."
         )
@@ -258,6 +261,7 @@ def _answer_constraints_for_intent(intent: str, question: str) -> str:
 def _sanitize_llm_answer(state: AgentState, answer: str) -> str:
     cleaned = answer.strip()
     if state["intent"] == AgentIntent.EXTERNAL_WEATHER and _asks_electricity_forecast(state["question"]):
+        cleaned = _remove_speculative_phrases(cleaned)
         blocked_terms = ("예상 수입", "예상 지출", "순현금흐름", "순자산")
         mentions_model = any(term in cleaned.lower() for term in ["sarimax", "xgboost", "rule_based"])
         if any(term in cleaned for term in blocked_terms) or (
@@ -276,6 +280,18 @@ def _sanitize_llm_answer(state: AgentState, answer: str) -> str:
     return cleaned
 
 
+def _remove_speculative_phrases(answer: str) -> str:
+    replacements = {
+        "것으로 보입니다": "것입니다",
+        "보입니다": "입니다",
+        "추정됩니다": "예측됩니다",
+    }
+    cleaned = answer
+    for source, target in replacements.items():
+        cleaned = cleaned.replace(source, target)
+    return cleaned
+
+
 def _asks_net_worth_question(question: str) -> bool:
     normalized = question.lower()
     return any(keyword in normalized for keyword in ["순자산", "전체 자산", "총자산", "net worth"])
@@ -283,7 +299,7 @@ def _asks_net_worth_question(question: str) -> bool:
 
 def _asks_model_or_basis_question(question: str) -> bool:
     normalized = question.lower()
-    return any(keyword in normalized for keyword in ["모델", "근거", "sarimax", "xgboost", "왜", "어떻게 계산"])
+    return any(keyword in normalized for keyword in ["모델", "근거", "이유", "sarimax", "xgboost", "왜", "어떻게 계산"])
 
 
 async def _plan_tools_with_llm(state: AgentState) -> tuple[list[dict], str, str | None]:
@@ -452,6 +468,8 @@ def _build_deterministic_answer(state: AgentState) -> str:
 
     primary_content = next((result.content for result in state["tool_results"] if result.content), "")
     if state["intent"] == AgentIntent.EXTERNAL_WEATHER and _asks_electricity_forecast(state["question"]):
+        if _asks_model_or_basis_question(state["question"]):
+            return _build_electricity_basis_answer(state)
         category_evidence = next((item for item in state["evidence"] if "전기요금" in item), "")
         return f"{category_evidence}." if category_evidence else primary_content
     if state["intent"] == AgentIntent.EXTERNAL_REAL_ESTATE:
@@ -462,6 +480,21 @@ def _build_deterministic_answer(state: AgentState) -> str:
     if state["missing_data"]:
         missing_text = f" 다만 {', '.join(state['missing_data'])}가 부족해 신뢰도는 {state['confidence']}입니다."
     return f"{primary_content} 근거: {evidence_text}.{missing_text}"
+
+
+def _build_electricity_basis_answer(state: AgentState) -> str:
+    category_evidence = next((item for item in state["evidence"] if "전기요금" in item), "")
+    if not category_evidence:
+        return next((result.content for result in state["tool_results"] if result.content), "")
+    amount_text = category_evidence.split(",")[0]
+    model_text = ""
+    if "사용 모델" in category_evidence:
+        model = category_evidence.rsplit("사용 모델", 1)[1].strip()
+        model_text = f" 이 예측에는 시계열 분석 모델({model})이 사용되었습니다."
+    return (
+        f"최근 전기요금 기록의 월별 계절성과 최근 변동 추세를 반영하여 {amount_text}으로 계산했습니다."
+        f"{model_text}"
+    )
 
 
 def _build_deterministic_suggested_questions(state: AgentState) -> list[str]:
