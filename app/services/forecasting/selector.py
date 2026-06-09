@@ -10,7 +10,7 @@ def select_model(item: CashflowItem) -> str:
     description = (item.description or "").lower()
     text = f"{category} {description}"
     if any(keyword in text for keyword in SEASONAL_KEYWORDS):
-        return "sarimax_placeholder"
+        return "sarimax"
     if any(keyword in text for keyword in FIXED_KEYWORDS):
         return "rule_based"
-    return "xgboost_placeholder"
+    return "xgboost"

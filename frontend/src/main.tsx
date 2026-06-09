@@ -82,21 +82,23 @@ const testQuestions = [
 ];
 
 const defaultCashflows: CashflowDraft[] = [
-  ...Array.from({ length: 12 }, (_, index) => {
-    const month = `${index + 1}`.padStart(2, "0");
+  ...Array.from({ length: 24 }, (_, index) => {
+    const year = index < 12 ? 2024 : 2025;
+    const monthNumber = (index % 12) + 1;
+    const month = `${monthNumber}`.padStart(2, "0");
     return [
-      { date: `2025-${month}-01`, amount: "3000000", type: "income" as const, category: "월급", description: "" },
-      { date: `2025-${month}-10`, amount: "650000", type: "income" as const, category: "연금", description: "" },
+      { date: `${year}-${month}-01`, amount: "3000000", type: "income" as const, category: "월급", description: "" },
+      { date: `${year}-${month}-10`, amount: "650000", type: "income" as const, category: "연금", description: "" },
       {
-        date: `2025-${month}-05`,
+        date: `${year}-${month}-05`,
         amount: `${950000 + index * 15000}`,
         type: "expense" as const,
         category: "생활비",
         description: "",
       },
       {
-        date: `2025-${month}-18`,
-        amount: `${130000 + (index % 4) * 25000}`,
+        date: `${year}-${month}-18`,
+        amount: `${electricitySampleAmount(monthNumber, index)}`,
         type: "expense" as const,
         category: "전기요금",
         description: "계절성 공과금",
@@ -106,7 +108,7 @@ const defaultCashflows: CashflowDraft[] = [
 ];
 
 function App() {
-  const [title, setTitle] = useState("12개월 현금흐름 분석");
+  const [title, setTitle] = useState("24개월 현금흐름 분석");
   const [forecastMonths, setForecastMonths] = useState(6);
   const [cashflows, setCashflows] = useState<CashflowDraft[]>(defaultCashflows);
   const [assets, setAssets] = useState<AssetDraft[]>([
@@ -553,6 +555,14 @@ function buildInitialSuggestedQuestions(analysis: AnalysisResponse | null) {
     "카테고리별 지출을 보여줘",
     `${forecastMonths}개월 뒤 순자산은 얼마야?`,
   ];
+}
+
+function electricitySampleAmount(month: number, index: number) {
+  const seasonalPeak = [1, 2, 7, 8, 12].includes(month);
+  const shoulderSeason = [6, 9].includes(month);
+  if (seasonalPeak) return 260000 + (index % 3) * 18000;
+  if (shoulderSeason) return 190000 + (index % 2) * 12000;
+  return 125000 + (index % 2) * 9000;
 }
 
 createRoot(document.getElementById("root")!).render(

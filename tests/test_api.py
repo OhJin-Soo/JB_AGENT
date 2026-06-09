@@ -69,21 +69,23 @@ def test_create_get_history_and_chat() -> None:
 
 def build_sample_cashflows() -> list[dict]:
     rows: list[dict] = []
-    for month in range(1, 13):
+    for index in range(24):
+        year = 2024 if index < 12 else 2025
+        month = (index % 12) + 1
         month_text = f"{month:02d}"
         rows.extend(
             [
-                {"date": f"2025-{month_text}-01", "amount": 3000000, "type": "income", "category": "월급"},
-                {"date": f"2025-{month_text}-10", "amount": 650000, "type": "income", "category": "연금"},
+                {"date": f"{year}-{month_text}-01", "amount": 3000000, "type": "income", "category": "월급"},
+                {"date": f"{year}-{month_text}-10", "amount": 650000, "type": "income", "category": "연금"},
                 {
-                    "date": f"2025-{month_text}-05",
-                    "amount": 950000 + (month - 1) * 15000,
+                    "date": f"{year}-{month_text}-05",
+                    "amount": 950000 + index * 15000,
                     "type": "expense",
                     "category": "생활비",
                 },
                 {
-                    "date": f"2025-{month_text}-18",
-                    "amount": 130000 + ((month - 1) % 4) * 25000,
+                    "date": f"{year}-{month_text}-18",
+                    "amount": electricity_sample_amount(month, index),
                     "type": "expense",
                     "category": "전기요금",
                     "description": "계절성 공과금",
@@ -91,3 +93,11 @@ def build_sample_cashflows() -> list[dict]:
             ]
         )
     return rows
+
+
+def electricity_sample_amount(month: int, index: int) -> int:
+    if month in {1, 2, 7, 8, 12}:
+        return 260000 + (index % 3) * 18000
+    if month in {6, 9}:
+        return 190000 + (index % 2) * 12000
+    return 125000 + (index % 2) * 9000
