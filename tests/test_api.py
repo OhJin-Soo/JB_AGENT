@@ -11,6 +11,7 @@ from app.agents.tools import (
     AgentIntent,
     _build_real_estate_projection,
     _parse_real_estate_change_rates,
+    _find_target_month_key,
     classify_question,
     get_category_forecast,
 )
@@ -231,6 +232,69 @@ def test_electricity_category_question_only_returns_requested_month_without_mode
 
     assert result.evidence == ["전기요금 2026-01 입력 데이터 기준 260,000원"]
     assert not result.missing_data
+
+
+def test_electricity_out_of_range_message_uses_forecast_range_only() -> None:
+    analysis = AnalysisResponse.model_validate(
+        {
+            "id": 1,
+            "title": "electricity",
+            "created_at": "2026-06-09T00:00:00",
+            "result": {
+                "forecast": [
+                    {
+                        "month": "2026-07",
+                        "income": 3650000,
+                        "expense": 1300000,
+                        "net_cashflow": 2350000,
+                        "cumulative_cashflow": 2350000,
+                        "net_worth": 440000000,
+                    },
+                    {
+                        "month": "2026-12",
+                        "income": 3650000,
+                        "expense": 1300000,
+                        "net_cashflow": 2350000,
+                        "cumulative_cashflow": 4700000,
+                        "net_worth": 442000000,
+                    },
+                ],
+                "categories": [
+                    {
+                        "category": "전기요금",
+                        "type": "expense",
+                        "model": "sarimax",
+                        "monthly_amount": 213833,
+                        "observed": {"2024-01": 260000, "2026-01": 260000},
+                        "forecast": {"2026-07": 278000, "2026-12": 260000},
+                    }
+                ],
+                "summary": "summary",
+                "chart": {"labels": [], "income": [], "expense": [], "net_worth": []},
+                "data_quality": {"observed_months": 30, "forecast_months": 6},
+            },
+        }
+    )
+
+    result = get_category_forecast(analysis, "내년 1월 내 전기요금은 어떻게 돼?")
+
+    assert result.missing_data == ["요청 월이 현재 예측 범위 밖입니다. 현재 예측 범위: 2026-07~2026-12"]
+    assert "2024-01" not in result.missing_data[0]
+
+
+def test_relative_year_is_based_on_current_date(monkeypatch) -> None:
+    from datetime import date
+
+    class FixedDate(date):
+        @classmethod
+        def today(cls):  # type: ignore[override]
+            return cls(2026, 6, 9)
+
+    monkeypatch.setattr("app.agents.tools.date", FixedDate)
+
+    target = _find_target_month_key("내년 1월 내 전기요금은 어떻게 돼?", ["2027-01", "2027-02"])
+
+    assert target == "2027-01"
 
 
 def test_electricity_reason_question_includes_basis_and_model_as_secondary_info() -> None:

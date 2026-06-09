@@ -110,6 +110,7 @@ def get_category_forecast(analysis: AnalysisResponse | None, question: str) -> T
     if not selected:
         selected = categories
     available_months = _category_available_months(selected)
+    forecast_months = _category_forecast_months(selected)
     target_month = _find_target_month_key(question, available_months)
     include_model = _asks_model_or_basis(question)
     observed_month_count = int(analysis.result.data_quality.get("observed_months", 0))
@@ -119,11 +120,18 @@ def get_category_forecast(analysis: AnalysisResponse | None, question: str) -> T
     ]
     missing_data: list[str] = []
     if target_month is None and _asks_specific_month(question):
-        first = available_months[0] if available_months else analysis.result.forecast[0].month
-        last = available_months[-1] if available_months else analysis.result.forecast[-1].month
+        first = forecast_months[0] if forecast_months else analysis.result.forecast[0].month
+        last = forecast_months[-1] if forecast_months else analysis.result.forecast[-1].month
         missing_data.append(f"요청 월이 현재 예측 범위 밖입니다. 현재 예측 범위: {first}~{last}")
     selected_text = ", ".join(item.category for item in selected[:3])
     target_text = f"{target_month} 기준" if target_month else "저장된 분석 기준"
+    if target_month is None and _asks_specific_month(question):
+        return ToolResult(
+            name="get_category_forecast",
+            content=f"요청 월은 현재 예측 범위 밖입니다. 현재 예측 범위는 {first}~{last}입니다.",
+            evidence=evidence,
+            missing_data=missing_data,
+        )
     return ToolResult(
         name="get_category_forecast",
         content=(
@@ -321,15 +329,20 @@ def _find_target_month_key(question: str, forecast_months: list[str]) -> str | N
     for month in forecast_months:
         if month in question:
             return month
+    explicit_year_match = re.search(r"(\d{4})년\s*(\d{1,2})월", question)
+    if explicit_year_match:
+        requested_year = int(explicit_year_match.group(1))
+        requested_month = int(explicit_year_match.group(2))
+        candidate = f"{requested_year:04d}-{requested_month:02d}"
+        return candidate if candidate in forecast_months else None
     month_match = re.search(r"(\d{1,2})월", question)
     if month_match:
         requested_month = int(month_match.group(1))
         matched = [month for month in forecast_months if int(month.split("-")[1]) == requested_month]
         if "내년" in question:
-            current_year = date.today().year
-            next_year = current_year + 1
-            next_year_match = [month for month in matched if int(month.split("-")[0]) == next_year]
-            return next_year_match[0] if next_year_match else None
+            next_year = date.today().year + 1
+            candidate = f"{next_year:04d}-{requested_month:02d}"
+            return candidate if candidate in forecast_months else None
         return matched[0] if matched else None
     for number in range(1, len(forecast_months) + 1):
         if f"{number}개월" in question or f"{number}달" in question:
@@ -345,6 +358,13 @@ def _category_available_months(categories) -> list[str]:
     months: set[str] = set()
     for item in categories:
         months.update(item.observed)
+        months.update(item.forecast)
+    return sorted(months)
+
+
+def _category_forecast_months(categories) -> list[str]:
+    months: set[str] = set()
+    for item in categories:
         months.update(item.forecast)
     return sorted(months)
 

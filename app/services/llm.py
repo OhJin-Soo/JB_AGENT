@@ -1,4 +1,5 @@
 from openai import AsyncOpenAI
+from openai import APIConnectionError, APITimeoutError, OpenAIError
 
 from app.core.config import get_settings
 
@@ -11,12 +12,17 @@ class LLMClient:
     async def answer(self, system_prompt: str, user_prompt: str) -> str:
         if self.client is None:
             return ""
-        response = await self.client.chat.completions.create(
-            model=self.settings.llm_model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.2,
-        )
-        return response.choices[0].message.content or ""
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.settings.llm_model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.2,
+            )
+            return response.choices[0].message.content or ""
+        except (APIConnectionError, APITimeoutError, OpenAIError):
+            return ""
+        except Exception:
+            return ""
