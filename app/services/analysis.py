@@ -5,11 +5,13 @@ from sqlalchemy.orm import Session
 
 from app.models.analysis import AnalysisRecord
 from app.schemas.analysis import AnalysisRequest, AnalysisResponse, AnalysisResult
+from app.services.external.context import collect_external_feature_context
 from app.services.forecasting.rules import run_rule_based_forecast
 
 
-def create_analysis(request: AnalysisRequest, db: Session) -> AnalysisResponse:
-    result = run_rule_based_forecast(request)
+async def create_analysis(request: AnalysisRequest, db: Session) -> AnalysisResponse:
+    external_context = await collect_external_feature_context()
+    result = run_rule_based_forecast(request, external_context)
     created_at = datetime.utcnow()
     record_id: int | None = None
 

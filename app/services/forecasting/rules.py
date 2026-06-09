@@ -9,6 +9,7 @@ from app.schemas.analysis import (
     CategoryForecast,
     ForecastPoint,
 )
+from app.services.external.context import ExternalFeatureContext
 from app.services.forecasting.features import build_external_feature_rows
 from app.services.forecasting.sarimax import forecast_seasonal_category
 from app.services.forecasting.selector import select_model
@@ -25,7 +26,10 @@ def _add_months(value: date, months: int) -> date:
     return date(year, month, 1)
 
 
-def run_rule_based_forecast(request: AnalysisRequest) -> AnalysisResult:
+def run_rule_based_forecast(
+    request: AnalysisRequest,
+    external_context: ExternalFeatureContext | None = None,
+) -> AnalysisResult:
     grouped: dict[tuple[str, CashflowType], dict[str, float]] = defaultdict(lambda: defaultdict(float))
     first_month = min(date(item.date.year, item.date.month, 1) for item in request.cashflows)
     last_month = max(date(item.date.year, item.date.month, 1) for item in request.cashflows)
@@ -33,8 +37,16 @@ def run_rule_based_forecast(request: AnalysisRequest) -> AnalysisResult:
     observed_months = [_month_key(month) for month in observed_month_dates]
     future_month_dates = [_add_months(last_month, offset) for offset in range(1, request.forecast_months + 1)]
     real_estate_asset_count = sum(1 for asset in request.assets if asset.type == AssetType.real_estate)
-    observed_external_features = build_external_feature_rows(observed_month_dates, real_estate_asset_count)
-    future_external_features = build_external_feature_rows(future_month_dates, real_estate_asset_count)
+    observed_external_features = build_external_feature_rows(
+        observed_month_dates,
+        real_estate_asset_count,
+        external_context,
+    )
+    future_external_features = build_external_feature_rows(
+        future_month_dates,
+        real_estate_asset_count,
+        external_context,
+    )
 
     for item in request.cashflows:
         grouped[(item.category, item.type)][_month_key(item.date)] += item.amount
@@ -119,8 +131,12 @@ def run_rule_based_forecast(request: AnalysisRequest) -> AnalysisResult:
             "method": "model_selected_forecast_with_external_features",
             "model_counts": ", ".join(f"{model}:{count}" for model, count in sorted(model_counts.items())),
             "external_features": (
-                "month, temperature_proxy, cooling_degree_proxy, "
-                "heating_degree_proxy, real_estate_growth_proxy"
+                "month, temperature_or_climatology, cooling_degree_proxy, "
+                "heating_degree_proxy, real_estate_growth_rate"
+            ),
+            "external_data_sources": (
+                f"weather={external_context.weather_source if external_context else 'proxy'}, "
+                f"real_estate={external_context.real_estate_source if external_context else 'proxy'}"
             ),
         },
     )

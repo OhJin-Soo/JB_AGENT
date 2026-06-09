@@ -18,6 +18,7 @@ from app.agents.tools import (
 from app.core.database import Base, engine
 from app.main import app
 from app.schemas.analysis import AnalysisResponse
+from app.services.external.context import ExternalFeatureContext
 
 
 def setup_function() -> None:
@@ -25,7 +26,11 @@ def setup_function() -> None:
     Base.metadata.create_all(bind=engine)
 
 
-def test_create_get_history_and_chat() -> None:
+def test_create_get_history_and_chat(monkeypatch) -> None:
+    async def fake_collect_external_feature_context():
+        return ExternalFeatureContext()
+
+    monkeypatch.setattr("app.services.analysis.collect_external_feature_context", fake_collect_external_feature_context)
     client = TestClient(app)
     payload = {
         "title": "MVP analysis",

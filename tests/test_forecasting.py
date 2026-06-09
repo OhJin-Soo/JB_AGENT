@@ -1,6 +1,8 @@
 from datetime import date
 
 from app.schemas.analysis import AnalysisRequest, AssetInput, AssetType, CashflowItem, CashflowType
+from app.services.external.context import ExternalFeatureContext
+from app.services.forecasting.features import build_external_feature_rows
 from app.services.forecasting.rules import run_rule_based_forecast
 
 
@@ -70,3 +72,21 @@ def electricity_sample_amount(month: int, index: int) -> int:
     if month in {6, 9}:
         return 190_000 + (index % 2) * 12_000
     return 125_000 + (index % 2) * 9_000
+
+
+def test_external_context_is_used_for_feature_rows() -> None:
+    context = ExternalFeatureContext(
+        weather_monthly_avg_temp={"2026-01": 2.0},
+        weather_monthly_climatology={1: 3.0, 7: 28.0},
+        real_estate_monthly_growth={"2026-01": 0.01},
+        real_estate_recent_growth_avg=0.02,
+        weather_source="kma_sfcdd3.php",
+        real_estate_source="reb_openapi",
+    )
+
+    rows = build_external_feature_rows([date(2026, 1, 1), date(2026, 7, 1)], 1, context)
+
+    assert rows[0][1] == 2.0
+    assert rows[0][4] == 0.01
+    assert rows[1][1] == 28.0
+    assert rows[1][4] == 0.02

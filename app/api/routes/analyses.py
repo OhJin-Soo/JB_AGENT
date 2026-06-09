@@ -9,8 +9,8 @@ router = APIRouter(prefix="/analyses", tags=["analyses"])
 
 
 @router.post("", response_model=AnalysisResponse)
-def create_analysis_endpoint(request: AnalysisRequest, db: Session = Depends(get_db)) -> AnalysisResponse:
-    return create_analysis(request, db)
+async def create_analysis_endpoint(request: AnalysisRequest, db: Session = Depends(get_db)) -> AnalysisResponse:
+    return await create_analysis(request, db)
 
 
 @router.get("/{analysis_id}", response_model=AnalysisResponse)
