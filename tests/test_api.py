@@ -46,6 +46,15 @@ def test_create_get_history_and_chat() -> None:
     assert chat.json()["confidence"] in {"low", "medium", "high"}
     assert len(chat.json()["suggested_questions"]) <= 3
     assert chat.json()["suggestion_status"] in {"generated", "fallback_generated"}
+    assert chat.json()["tool_plan_status"] in {
+        "llm_planned",
+        "fallback_generated",
+        "llm_unavailable",
+        "parse_error",
+        "invalid_tool",
+        "empty_by_llm",
+    }
+    assert "get_category_forecast" in chat.json()["tool_calls"]
 
     monthly_chat = client.post("/chat", json={"question": "2개월 뒤 순자산은?", "analysis_id": analysis_id})
     assert monthly_chat.status_code == 200
@@ -53,6 +62,7 @@ def test_create_get_history_and_chat() -> None:
     assert any("2026-02" in item for item in monthly_chat.json()["evidence"])
     assert monthly_chat.json()["suggested_questions"]
     assert monthly_chat.json()["suggestion_reason"]
+    assert "get_monthly_forecast" in monthly_chat.json()["tool_calls"]
 
     weather_chat = client.post(
         "/chat",
@@ -61,6 +71,7 @@ def test_create_get_history_and_chat() -> None:
     assert weather_chat.status_code == 200
     weather_data = weather_chat.json()
     assert weather_data["intent"] == "external_weather"
+    assert "fetch_weather_context" in weather_data["tool_calls"]
     assert any("kma_sfcdd3.php" in item for item in weather_data["evidence"][:4])
     assert any("kma_sfcdd3.php" in item for item in weather_data["evidence"])
     assert any("tm1, tm2, stn, help, authKey" in item for item in weather_data["evidence"])

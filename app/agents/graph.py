@@ -4,19 +4,19 @@ from typing import TypedDict
 from langgraph.graph import END, START, StateGraph
 from sqlalchemy.orm import Session
 
+from app.agents.tool_registry import (
+    TOOL_SPECS,
+    execute_tool_call,
+    fallback_tool_names_for_intent,
+    tool_catalog_for_prompt,
+)
 from app.agents.tools import (
     AgentIntent,
     ToolResult,
     build_suggested_actions,
     classify_question,
     confidence_from,
-    fetch_real_estate_context,
-    fetch_weather_context,
-    get_analysis_summary,
-    get_category_forecast,
-    get_monthly_forecast,
     retrieve_analysis,
-    search_web_context,
     validate_data_sufficiency,
 )
 from app.schemas.analysis import AnalysisResponse
@@ -29,6 +29,9 @@ class AgentState(TypedDict):
     analysis_id: int | None
     intent: str
     analysis: AnalysisResponse | None
+    tool_plan: list[dict]
+    tool_plan_status: str
+    tool_plan_reason: str | None
     tool_results: list[ToolResult]
     sources: list[str]
     evidence: list[str]
@@ -54,28 +57,26 @@ def build_agent_graph(db: Session):
         state["analysis"] = retrieve_analysis(state["analysis_id"], db)
         return state
 
+    async def plan_tools(state: AgentState) -> AgentState:
+        plan, status, reason = await _plan_tools_with_llm(state)
+        state["tool_plan"] = plan
+        state["tool_plan_status"] = status
+        state["tool_plan_reason"] = reason
+        return state
+
     async def execute_tools(state: AgentState) -> AgentState:
-        analysis = state["analysis"]
-        intent = state["intent"]
         results: list[ToolResult] = []
+        plan = state["tool_plan"] or _fallback_tool_plan(state["intent"])
+        if not state["tool_plan"]:
+            state["tool_plan_status"] = "fallback_generated"
+            state["tool_plan_reason"] = state["tool_plan_reason"] or "LLM tool plan을 사용할 수 없어 intent fallback을 사용했습니다."
 
-        if intent == AgentIntent.EXTERNAL_WEATHER:
-            results.append(await fetch_weather_context())
-            results.append(get_analysis_summary(analysis))
-        elif intent == AgentIntent.EXTERNAL_REAL_ESTATE:
-            results.append(await fetch_real_estate_context())
-            results.append(get_analysis_summary(analysis))
-        elif intent == AgentIntent.EXTERNAL_SEARCH:
-            results.append(await search_web_context(state["question"]))
-            results.append(get_analysis_summary(analysis))
-        elif intent == AgentIntent.MONTHLY_FORECAST:
-            results.append(get_monthly_forecast(analysis, state["question"]))
-        elif intent == AgentIntent.CATEGORY_ANALYSIS:
-            results.append(get_category_forecast(analysis, state["question"]))
-        else:
-            results.append(get_analysis_summary(analysis))
+        for call in plan[:5]:
+            name = str(call.get("name", ""))
+            arguments = call.get("arguments") if isinstance(call.get("arguments"), dict) else {}
+            results.append(await execute_tool_call(name, state["question"], state["analysis"], arguments))
 
-        results.append(validate_data_sufficiency(analysis, intent))
+        results.append(validate_data_sufficiency(state["analysis"], state["intent"]))
         state["tool_results"] = results
         return state
 
@@ -125,13 +126,15 @@ def build_agent_graph(db: Session):
 
     graph.add_node("classify", classify)
     graph.add_node("load_analysis", load_analysis)
+    graph.add_node("plan_tools", plan_tools)
     graph.add_node("execute_tools", execute_tools)
     graph.add_node("validate_evidence", validate_evidence)
     graph.add_node("generate_answer", generate_answer)
     graph.add_node("generate_suggestions", generate_suggestions)
     graph.add_edge(START, "classify")
     graph.add_edge("classify", "load_analysis")
-    graph.add_edge("load_analysis", "execute_tools")
+    graph.add_edge("load_analysis", "plan_tools")
+    graph.add_edge("plan_tools", "execute_tools")
     graph.add_edge("execute_tools", "validate_evidence")
     graph.add_edge("validate_evidence", "generate_answer")
     graph.add_edge("generate_answer", "generate_suggestions")
@@ -147,6 +150,9 @@ async def run_agent(request: ChatRequest, db: Session) -> ChatResponse:
             "analysis_id": request.analysis_id,
             "intent": AgentIntent.GENERAL,
             "analysis": None,
+            "tool_plan": [],
+            "tool_plan_status": "none",
+            "tool_plan_reason": None,
             "tool_results": [],
             "sources": [],
             "evidence": [],
@@ -173,6 +179,9 @@ async def run_agent(request: ChatRequest, db: Session) -> ChatResponse:
         suggested_questions=final_state["suggested_questions"][:3],
         suggestion_status=final_state["suggestion_status"],
         suggestion_reason=final_state["suggestion_reason"],
+        tool_plan_status=final_state["tool_plan_status"],
+        tool_plan_reason=final_state["tool_plan_reason"],
+        tool_calls=[str(call.get("name")) for call in final_state["tool_plan"][:5]],
     )
 
 
@@ -192,11 +201,66 @@ async def _generate_llm_answer(state: AgentState) -> str:
     user_prompt = (
         f"Intent: {state['intent']}\n"
         f"Question: {state['question']}\n"
+        f"Tool plan status: {state['tool_plan_status']} ({state['tool_plan_reason'] or 'no reason'})\n"
         f"Tool results:\n{context}\n"
         f"Missing data: {', '.join(state['missing_data']) or 'none'}\n"
         f"Evidence: {'; '.join(state['evidence']) or 'none'}"
     )
     return await LLMClient().answer(system_prompt, user_prompt)
+
+
+async def _plan_tools_with_llm(state: AgentState) -> tuple[list[dict], str, str | None]:
+    recent_turns = "\n".join(f"{item.role}: {item.content}" for item in state["conversation"][-6:])
+    system_prompt = (
+        "You are a tool planner for a Korean financial analysis agent. Return only valid JSON. "
+        "Do not answer the user. Choose the minimal required tools from the catalog. "
+        "Return at most 5 tool calls. Never invent tool names or arguments."
+    )
+    user_prompt = (
+        f"Question: {state['question']}\n"
+        f"Keyword fallback intent: {state['intent']}\n"
+        f"Has analysis result: {state['analysis'] is not None}\n"
+        f"Recent conversation:\n{recent_turns or 'none'}\n\n"
+        f"Tool catalog:\n{tool_catalog_for_prompt()}\n\n"
+        "Return JSON with this exact shape:\n"
+        '{"tool_calls":[{"name":"tool_name","arguments":{}}],"reason":"short reason"}'
+    )
+    raw = await LLMClient().answer(system_prompt, user_prompt)
+    if not raw:
+        return [], "llm_unavailable", "LLM 응답이 없어 intent fallback tool plan을 사용합니다."
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return [], "parse_error", "LLM tool plan JSON 파싱에 실패해 intent fallback을 사용합니다."
+    if not isinstance(parsed, dict):
+        return [], "parse_error", "LLM tool plan이 객체가 아니어서 intent fallback을 사용합니다."
+
+    raw_calls = parsed.get("tool_calls", [])
+    if not isinstance(raw_calls, list):
+        return [], "parse_error", "tool_calls가 배열이 아니어서 intent fallback을 사용합니다."
+
+    calls: list[dict] = []
+    invalid_names: list[str] = []
+    for call in raw_calls[:5]:
+        if not isinstance(call, dict):
+            continue
+        name = call.get("name")
+        if not isinstance(name, str) or name not in TOOL_SPECS:
+            invalid_names.append(str(name))
+            continue
+        arguments = call.get("arguments")
+        calls.append({"name": name, "arguments": arguments if isinstance(arguments, dict) else {}})
+
+    if calls:
+        reason = parsed.get("reason")
+        return calls, "llm_planned", reason if isinstance(reason, str) else "LLM이 tool plan을 생성했습니다."
+    if invalid_names:
+        return [], "invalid_tool", f"허용되지 않은 tool이 포함되어 intent fallback을 사용합니다: {', '.join(invalid_names)}"
+    return [], "empty_by_llm", "LLM이 tool call을 생성하지 않아 intent fallback을 사용합니다."
+
+
+def _fallback_tool_plan(intent: str) -> list[dict]:
+    return [{"name": name, "arguments": {}} for name in fallback_tool_names_for_intent(intent)]
 
 
 async def _generate_llm_suggested_questions(state: AgentState) -> tuple[list[str], str, str | None]:

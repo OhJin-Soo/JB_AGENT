@@ -73,6 +73,9 @@ type ChatMessage = {
   suggestedActions?: string[];
   suggestionStatus?: string;
   suggestionReason?: string | null;
+  toolPlanStatus?: string;
+  toolPlanReason?: string | null;
+  toolCalls?: string[];
 };
 
 const testQuestions = [
@@ -220,6 +223,9 @@ function App() {
           suggestedActions: data.suggested_actions ?? [],
           suggestionStatus: data.suggestion_status,
           suggestionReason: data.suggestion_reason,
+          toolPlanStatus: data.tool_plan_status,
+          toolPlanReason: data.tool_plan_reason,
+          toolCalls: data.tool_calls ?? [],
         },
       ]);
     } finally {
@@ -450,6 +456,14 @@ function App() {
                                 {message.suggestionStatus && (
                                   <span className="suggestion-debug" title={message.suggestionReason ?? undefined}>
                                     추천 {message.suggestionStatus}
+                                  </span>
+                                )}
+                                {message.toolPlanStatus && (
+                                  <span className="suggestion-debug" title={message.toolPlanReason ?? undefined}>
+                                    tool {message.toolPlanStatus}
+                                    {message.toolCalls && message.toolCalls.length > 0
+                                      ? `: ${message.toolCalls.join(", ")}`
+                                      : ""}
                                   </span>
                                 )}
                               </div>

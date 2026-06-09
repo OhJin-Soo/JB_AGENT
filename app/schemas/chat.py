@@ -24,3 +24,6 @@ class ChatResponse(BaseModel):
     suggested_questions: list[str] = Field(default_factory=list, max_length=3)
     suggestion_status: str = "none"
     suggestion_reason: str | None = None
+    tool_plan_status: str = "none"
+    tool_plan_reason: str | None = None
+    tool_calls: list[str] = Field(default_factory=list)
