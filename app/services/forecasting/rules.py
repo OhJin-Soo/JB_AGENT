@@ -64,6 +64,10 @@ def run_rule_based_forecast(request: AnalysisRequest) -> AnalysisResult:
                 type=flow_type,
                 model=model,
                 monthly_amount=round(sum(forecast_values) / len(forecast_values), 2),
+                forecast={
+                    _month_key(future_month_dates[index]): round(value, 2)
+                    for index, value in enumerate(forecast_values)
+                },
             )
         )
         target = income_forecasts if flow_type == CashflowType.income else expense_forecasts

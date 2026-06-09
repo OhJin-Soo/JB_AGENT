@@ -54,16 +54,23 @@ def _to_response(record: AnalysisRecord) -> AnalysisResponse:
 
 
 def _hydrate_result_metadata(result: AnalysisResult, request_json: str) -> None:
-    if "real_estate_initial_value" in result.data_quality:
-        return
     try:
         request_data = json.loads(request_json)
     except json.JSONDecodeError:
         return
-    real_estate_value = sum(
-        float(asset.get("current_value", 0) or 0)
-        for asset in request_data.get("assets", [])
-        if asset.get("type") == "real_estate"
-    )
-    result.data_quality["real_estate_initial_value"] = round(real_estate_value, 2)
-    result.data_quality["real_estate_monthly_growth_proxy"] = 0.0015 if real_estate_value else 0.0
+    if "real_estate_initial_value" not in result.data_quality:
+        real_estate_value = sum(
+            float(asset.get("current_value", 0) or 0)
+            for asset in request_data.get("assets", [])
+            if asset.get("type") == "real_estate"
+        )
+        result.data_quality["real_estate_initial_value"] = round(real_estate_value, 2)
+        result.data_quality["real_estate_monthly_growth_proxy"] = 0.0015 if real_estate_value else 0.0
+    if any(not category.forecast for category in result.categories):
+        try:
+            refreshed = run_rule_based_forecast(AnalysisRequest.model_validate(request_data))
+        except Exception:
+            return
+        forecast_by_key = {(category.category, category.type): category.forecast for category in refreshed.categories}
+        for category in result.categories:
+            category.forecast = forecast_by_key.get((category.category, category.type), category.forecast)

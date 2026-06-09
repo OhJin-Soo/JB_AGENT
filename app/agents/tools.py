@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import date
+import re
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
@@ -108,14 +109,25 @@ def get_category_forecast(analysis: AnalysisResponse | None, question: str) -> T
     ]
     if not selected:
         selected = categories
+    target_month = _find_target_month_key(question, [point.month for point in analysis.result.forecast])
     evidence = [
-        f"{item.category}({item.type.value}) 월평균 {item.monthly_amount:,.0f}원, 적용 모델 {item.model}"
+        _format_category_forecast_evidence(item, target_month)
         for item in selected[:8]
     ]
+    missing_data: list[str] = []
+    if target_month is None and _asks_specific_month(question):
+        first = analysis.result.forecast[0].month
+        last = analysis.result.forecast[-1].month
+        missing_data.append(f"요청 월이 현재 예측 범위 밖입니다. 현재 예측 범위: {first}~{last}")
+    selected_text = ", ".join(item.category for item in selected[:3])
+    target_text = f"{target_month} 기준" if target_month else "예측 범위 기준"
     return ToolResult(
         name="get_category_forecast",
-        content="카테고리별 예측은 입력 데이터의 월평균 금액과 모델 선택 정책을 기준으로 계산되었습니다.",
+        content=(
+            f"{selected_text} 카테고리 예측은 저장된 분석 결과의 {target_text} 카테고리별 모델 예측값을 기준으로 합니다."
+        ),
         evidence=evidence,
+        missing_data=missing_data,
     )
 
 
@@ -300,6 +312,41 @@ def _find_target_month(question: str, points):
         if f"{number}개월" in question or f"{number}달" in question:
             return points[number - 1]
     return None
+
+
+def _find_target_month_key(question: str, forecast_months: list[str]) -> str | None:
+    for month in forecast_months:
+        if month in question:
+            return month
+    month_match = re.search(r"(\d{1,2})월", question)
+    if month_match:
+        requested_month = int(month_match.group(1))
+        matched = [month for month in forecast_months if int(month.split("-")[1]) == requested_month]
+        if "내년" in question:
+            current_year = date.today().year
+            next_year = current_year + 1
+            next_year_match = [month for month in matched if int(month.split("-")[0]) == next_year]
+            return next_year_match[0] if next_year_match else None
+        return matched[0] if matched else None
+    for number in range(1, len(forecast_months) + 1):
+        if f"{number}개월" in question or f"{number}달" in question:
+            return forecast_months[number - 1]
+    return None
+
+
+def _asks_specific_month(question: str) -> bool:
+    return bool(re.search(r"\d{1,2}월", question) or "내년" in question or "개월" in question or "달" in question)
+
+
+def _format_category_forecast_evidence(item, target_month: str | None) -> str:
+    if target_month and item.forecast:
+        amount = item.forecast.get(target_month)
+        if amount is not None:
+            return (
+                f"{item.category}({item.type.value}) {target_month} 예측 {amount:,.0f}원, "
+                f"적용 모델 {item.model}"
+            )
+    return f"{item.category}({item.type.value}) 월평균 {item.monthly_amount:,.0f}원, 적용 모델 {item.model}"
 
 
 def _parse_real_estate_change_rates(data: dict) -> dict:

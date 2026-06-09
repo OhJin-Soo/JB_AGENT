@@ -166,10 +166,24 @@ def test_real_estate_api_projection_adjusts_asset_value() -> None:
 def test_real_estate_tool_plan_drops_generic_monthly_forecast() -> None:
     scoped = _scope_tool_plan_for_intent(
         AgentIntent.EXTERNAL_REAL_ESTATE,
+        "내 부동산 자산이 6개월 후에 어떻게 될까?",
+        True,
         [{"name": "get_monthly_forecast", "arguments": {}}, {"name": "fetch_real_estate_context", "arguments": {}}],
     )
 
     assert scoped == [{"name": "fetch_real_estate_context", "arguments": {}}]
+
+
+def test_electricity_forecast_tool_plan_uses_category_model_and_drops_generic_search() -> None:
+    scoped = _scope_tool_plan_for_intent(
+        AgentIntent.EXTERNAL_WEATHER,
+        "내년 8월에 전기요금은 어떻게 될까?",
+        True,
+        [{"name": "fetch_weather_context", "arguments": {}}, {"name": "search_web_context", "arguments": {}}],
+    )
+
+    assert {"name": "get_category_forecast", "arguments": {}} in scoped
+    assert {"name": "search_web_context", "arguments": {}} not in scoped
 
 
 def test_real_estate_answer_does_not_append_duplicate_basis_label() -> None:

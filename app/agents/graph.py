@@ -67,12 +67,12 @@ def build_agent_graph(db: Session):
     async def execute_tools(state: AgentState) -> AgentState:
         results: list[ToolResult] = []
         plan = state["tool_plan"] or _fallback_tool_plan(state["intent"])
-        plan = _scope_tool_plan_for_intent(state["intent"], plan)
+        plan = _scope_tool_plan_for_intent(state["intent"], state["question"], state["analysis"] is not None, plan)
         if not state["tool_plan"]:
             state["tool_plan_status"] = "fallback_generated"
             state["tool_plan_reason"] = state["tool_plan_reason"] or "LLM tool plan을 사용할 수 없어 intent fallback을 사용했습니다."
         state["tool_plan"] = plan
-        if state["intent"] == AgentIntent.EXTERNAL_REAL_ESTATE:
+        if state["intent"] in {AgentIntent.EXTERNAL_REAL_ESTATE, AgentIntent.EXTERNAL_WEATHER}:
             state["tool_plan_reason"] = _build_korean_tool_plan_reason(plan)
 
         for call in plan[:5]:
@@ -207,7 +207,10 @@ async def _generate_llm_answer(state: AgentState) -> str:
         "asset changes, answer only about the real-estate asset value. Do not mention monthly "
         "income, expense, net cashflow, or net worth unless the user explicitly asks for net worth. "
         "For real-estate asset answers, naturally include the applied land-price change rate and "
-        "the calculation basis inside the paragraph. Do not append a separate '근거:' section."
+        "the calculation basis inside the paragraph. Do not append a separate '근거:' section. "
+        "For electricity bill forecast questions, prioritize get_category_forecast results and "
+        "state the category model such as SARIMAX or XGBoost. Do not replace the user's analysis "
+        "forecast with generic web-search electricity price information."
     )
     answer_constraints = _answer_constraints_for_intent(state["intent"], state["question"])
     user_prompt = (
@@ -223,6 +226,13 @@ async def _generate_llm_answer(state: AgentState) -> str:
 
 
 def _answer_constraints_for_intent(intent: str, question: str) -> str:
+    if intent == AgentIntent.EXTERNAL_WEATHER and _asks_electricity_forecast(question):
+        return (
+            "- 전기요금 카테고리의 저장된 모델 예측값을 우선 사용합니다.\n"
+            "- 적용 모델(SARIMAX/XGBoost/rule_based)을 답변에 포함합니다.\n"
+            "- 기상청 결과는 외생변수 맥락으로만 설명하고, Tavily나 일반 기사 수치로 사용자의 전기요금 예측값을 대체하지 않습니다.\n"
+            "- 요청 월이 예측 범위 밖이면 현재 예측 범위를 말하고 추가 예측 기간이 필요하다고 답합니다."
+        )
     if intent != AgentIntent.EXTERNAL_REAL_ESTATE:
         return "- 일반 답변 제약만 적용합니다."
     if any(keyword in question.lower() for keyword in ["순자산", "전체 자산", "총자산", "net worth"]):
@@ -311,11 +321,51 @@ def _fallback_tool_plan(intent: str) -> list[dict]:
     return [{"name": name, "arguments": {}} for name in fallback_tool_names_for_intent(intent)]
 
 
-def _scope_tool_plan_for_intent(intent: str, plan: list[dict]) -> list[dict]:
-    if intent != AgentIntent.EXTERNAL_REAL_ESTATE:
+def _scope_tool_plan_for_intent(intent: str, question: str, has_analysis: bool, plan: list[dict]) -> list[dict]:
+    if intent == AgentIntent.EXTERNAL_REAL_ESTATE:
+        real_estate_calls = [call for call in plan if call.get("name") == "fetch_real_estate_context"]
+        return real_estate_calls or _fallback_tool_plan(intent)
+    if intent == AgentIntent.EXTERNAL_WEATHER and has_analysis and _asks_electricity_forecast(question):
+        scoped = plan if _asks_explicit_search(question) else [call for call in plan if call.get("name") != "search_web_context"]
+        scoped = _ensure_tool_call(scoped, "get_category_forecast")
+        if _asks_weather_api_context(question):
+            scoped = _ensure_tool_call(scoped, "fetch_weather_context")
+        return _dedupe_tool_calls(scoped)
+    return plan
+
+
+def _asks_electricity_forecast(question: str) -> bool:
+    normalized = question.lower()
+    has_electricity = any(keyword in normalized for keyword in ["전기요금", "전기", "냉방", "난방"])
+    has_forecast = any(keyword in normalized for keyword in ["예측", "어떻게", "얼마", "내년", "개월", "월", "뒤"])
+    return has_electricity and has_forecast
+
+
+def _asks_weather_api_context(question: str) -> bool:
+    normalized = question.lower()
+    return any(keyword in normalized for keyword in ["기상청", "날씨", "기온", "습도", "api"])
+
+
+def _asks_explicit_search(question: str) -> bool:
+    normalized = question.lower()
+    return any(keyword in normalized for keyword in ["최신", "뉴스", "검색", "시장", "요금 인상"])
+
+
+def _ensure_tool_call(plan: list[dict], name: str) -> list[dict]:
+    if any(call.get("name") == name for call in plan):
         return plan
-    real_estate_calls = [call for call in plan if call.get("name") == "fetch_real_estate_context"]
-    return real_estate_calls or _fallback_tool_plan(intent)
+    return [{"name": name, "arguments": {}}, *plan]
+
+
+def _dedupe_tool_calls(plan: list[dict]) -> list[dict]:
+    seen: set[str] = set()
+    output: list[dict] = []
+    for call in plan:
+        name = str(call.get("name", ""))
+        if name and name not in seen:
+            output.append(call)
+            seen.add(name)
+    return output
 
 
 def _build_korean_tool_plan_reason(calls: list[dict]) -> str:
