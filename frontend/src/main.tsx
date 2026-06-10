@@ -34,17 +34,21 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8001
 type CashflowType = "income" | "expense";
 
 type CashflowDraft = {
+  id: string;
   date: string;
   amount: string;
+  amountDisplay: string;
   type: CashflowType;
   category: string;
   description: string;
 };
 
 type AssetDraft = {
+  id: string;
   type: "cash" | "pension" | "real_estate" | "other";
   name: string;
   current_value: string;
+  current_value_display: string;
 };
 
 type CsvUploadResult = {
@@ -88,7 +92,7 @@ type ChatMessage = {
 
 function App() {
   const [title, setTitle] = useState("현금흐름 분석");
-  const [forecastMonths, setForecastMonths] = useState(6);
+  const [forecastMonths, setForecastMonths] = useState("6");
   const [cashflows, setCashflows] = useState<CashflowDraft[]>([]);
   const [assets, setAssets] = useState<AssetDraft[]>([]);
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
@@ -129,7 +133,7 @@ function App() {
     try {
       const payload = {
         title,
-        forecast_months: forecastMonths,
+        forecast_months: Number(forecastMonths),
         save: true,
         cashflows: cashflows.map((item) => ({
           date: item.date,
@@ -211,12 +215,16 @@ function App() {
     }
   }
 
-  function updateCashflow(index: number, patch: Partial<CashflowDraft>) {
-    setCashflows((items) => items.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item)));
+  function updateCashflowById(id: string, patch: Partial<CashflowDraft>) {
+    setCashflows((items) => items.map((item) => (item.id === id ? { ...item, ...patch } : item)));
   }
 
-  function updateAsset(index: number, patch: Partial<AssetDraft>) {
-    setAssets((items) => items.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item)));
+  function updateAssetById(id: string, patch: Partial<AssetDraft>) {
+    setAssets((items) => items.map((item) => (item.id === id ? { ...item, ...patch } : item)));
+  }
+
+  function makeRowId(prefix: string) {
+    return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   }
 
   async function handleCsvUpload(file: File) {
@@ -259,7 +267,7 @@ function App() {
                 min={1}
                 max={120}
                 value={forecastMonths}
-                onChange={(event) => setForecastMonths(Number(event.target.value))}
+                onChange={(event) => setForecastMonths(event.target.value)}
               />
             </label>
 
@@ -308,7 +316,15 @@ function App() {
                 onClick={() =>
                   setCashflows((items) => [
                     ...items,
-                    { date: "2026-04-01", amount: "0", type: "expense", category: "", description: "" },
+                    {
+                      id: makeRowId("cashflow"),
+                      date: "2026-04-01",
+                      amount: "0",
+                      amountDisplay: "0",
+                      type: "expense",
+                      category: "",
+                      description: "",
+                    },
                   ])
                 }
               >
@@ -318,19 +334,29 @@ function App() {
 
             <div className="rows">
               {cashflows.map((item, index) => (
-                <div className="cashflow-row" key={`${item.date}-${index}`}>
-                  <input type="date" value={item.date} onChange={(event) => updateCashflow(index, { date: event.target.value })} />
-                  <select value={item.type} onChange={(event) => updateCashflow(index, { type: event.target.value as CashflowType })}>
+                <div className="cashflow-row" key={item.id}>
+                  <input type="date" value={item.date} onChange={(event) => updateCashflowById(item.id, { date: event.target.value })} />
+                  <select value={item.type} onChange={(event) => updateCashflowById(item.id, { type: event.target.value as CashflowType })}>
                     <option value="income">수입</option>
                     <option value="expense">지출</option>
                   </select>
-                  <input value={item.category} placeholder="카테고리" onChange={(event) => updateCashflow(index, { category: event.target.value })} />
-                  <input type="number" value={item.amount} onChange={(event) => updateCashflow(index, { amount: event.target.value })} />
+                  <input value={item.category} placeholder="카테고리" onChange={(event) => updateCashflowById(item.id, { category: event.target.value })} />
+                  <input
+                    inputMode="numeric"
+                    value={item.amountDisplay}
+                    onChange={(event) => {
+                      const digits = event.target.value.replace(/[^\d]/g, "");
+                      updateCashflowById(item.id, {
+                        amount: digits,
+                        amountDisplay: formatNumberInput(digits),
+                      });
+                    }}
+                  />
                   <button
                     type="button"
                     className="icon-button danger"
                     title="삭제"
-                    onClick={() => setCashflows((items) => items.filter((_, itemIndex) => itemIndex !== index))}
+                    onClick={() => setCashflows((items) => items.filter((row) => row.id !== item.id))}
                   >
                     <Trash2 size={15} />
                   </button>
@@ -344,7 +370,18 @@ function App() {
                 type="button"
                 className="icon-button"
                 title="자산 추가"
-                onClick={() => setAssets((items) => [...items, { type: "cash", name: "", current_value: "0" }])}
+                onClick={() =>
+                  setAssets((items) => [
+                    ...items,
+                    {
+                      id: makeRowId("asset"),
+                      type: "cash",
+                      name: "",
+                      current_value: "0",
+                      current_value_display: "0",
+                    },
+                  ])
+                }
               >
                 <Plus size={16} />
               </button>
@@ -352,15 +389,25 @@ function App() {
 
             <div className="rows">
               {assets.map((asset, index) => (
-                <div className="asset-row" key={`${asset.name}-${index}`}>
-                  <select value={asset.type} onChange={(event) => updateAsset(index, { type: event.target.value as AssetDraft["type"] })}>
+                <div className="asset-row" key={asset.id}>
+                  <select value={asset.type} onChange={(event) => updateAssetById(asset.id, { type: event.target.value as AssetDraft["type"] })}>
                     <option value="cash">현금</option>
                     <option value="pension">연금</option>
                     <option value="real_estate">부동산</option>
                     <option value="other">기타</option>
                   </select>
-                  <input value={asset.name} placeholder="자산명" onChange={(event) => updateAsset(index, { name: event.target.value })} />
-                  <input type="number" value={asset.current_value} onChange={(event) => updateAsset(index, { current_value: event.target.value })} />
+                  <input value={asset.name} placeholder="자산명" onChange={(event) => updateAssetById(asset.id, { name: event.target.value })} />
+                  <input
+                    inputMode="numeric"
+                    value={asset.current_value_display}
+                    onChange={(event) => {
+                      const digits = event.target.value.replace(/[^\d]/g, "");
+                      updateAssetById(asset.id, {
+                        current_value: digits,
+                        current_value_display: formatNumberInput(digits),
+                      });
+                    }}
+                  />
                 </div>
               ))}
             </div>
@@ -632,20 +679,22 @@ function parseCsvUpload(file: File): Promise<CsvUploadResult> {
       throw new Error("CSV에 데이터가 없습니다.");
     }
 
-    const headers = rows[0].map((value) => normalizeHeader(value));
-    const cashflows: CashflowDraft[] = [];
-    const assets: AssetDraft[] = [];
+  const headers = rows[0].map((value) => normalizeHeader(value));
+  const cashflows: CashflowDraft[] = [];
+  const assets: AssetDraft[] = [];
+  let rowCounter = 0;
 
-    for (const row of rows.slice(1)) {
-      if (row.every((value) => value.trim() === "")) continue;
-      const record = buildRecord(headers, row);
-      if (isAssetRecord(record)) {
-        const asset = parseAssetRecord(record);
+  for (const row of rows.slice(1)) {
+    if (row.every((value) => value.trim() === "")) continue;
+    const record = buildRecord(headers, row);
+    if (isAssetRecord(record)) {
+        const asset = parseAssetRecord(record, rowCounter);
         if (asset) assets.push(asset);
-        continue;
+      } else {
+        const cashflow = parseCashflowRecord(record, rowCounter);
+        if (cashflow) cashflows.push(cashflow);
       }
-      const cashflow = parseCashflowRecord(record);
-      if (cashflow) cashflows.push(cashflow);
+      rowCounter += 1;
     }
 
     if (cashflows.length === 0) {
@@ -733,7 +782,7 @@ function isAssetRecord(record: Record<string, string>) {
   );
 }
 
-function parseCashflowRecord(record: Record<string, string>): CashflowDraft | null {
+function parseCashflowRecord(record: Record<string, string>, rowIndex: number): CashflowDraft | null {
   const dateValue = record.date || record.날짜 || "";
   const typeValue = normalizeCashflowType(record.type || record.수입지출 || "");
   const categoryValue = record.category || record.카테고리 || "";
@@ -743,15 +792,17 @@ function parseCashflowRecord(record: Record<string, string>): CashflowDraft | nu
   }
 
   return {
+    id: `cashflow-${rowIndex}-${dateValue}-${categoryValue}`,
     date: dateValue,
     type: typeValue,
     category: categoryValue,
     amount: String(amountValue),
+    amountDisplay: formatNumberInput(String(amountValue)),
     description: record.description || record.설명 || "",
   };
 }
 
-function parseAssetRecord(record: Record<string, string>): AssetDraft | null {
+function parseAssetRecord(record: Record<string, string>, rowIndex: number): AssetDraft | null {
   const assetType = normalizeAssetType(record.asset_type || record.자산유형 || record.type || "");
   const name = record.asset_name || record.name || record.자산명 || "";
   const value = parseAmount(record.asset_value || record.current_value || record.가치 || record.amount || "");
@@ -760,9 +811,11 @@ function parseAssetRecord(record: Record<string, string>): AssetDraft | null {
   }
 
   return {
+    id: `asset-${rowIndex}-${assetType}-${name}`,
     type: assetType,
     name,
     current_value: String(value),
+    current_value_display: formatNumberInput(String(value)),
   };
 }
 
@@ -793,6 +846,13 @@ function parseAmount(value: string) {
   const numeric = Number(value.replace(/,/g, "").trim());
   if (!Number.isFinite(numeric) || numeric < 0) return null;
   return numeric;
+}
+
+function formatNumberInput(value: string) {
+  if (!value) return "";
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return value;
+  return Math.round(numeric).toLocaleString("ko-KR");
 }
 
 createRoot(document.getElementById("root")!).render(
